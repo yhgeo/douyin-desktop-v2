@@ -74,7 +74,9 @@
             </Grid.ColumnDefinitions>
 
             <!-- 视频区：mpv 直接往这里画。任何 WPF 元素都盖不住它，所以这里不放文字 -->
-            <Grid x:Name="VideoHost" Grid.Column="0" Background="Black" SizeChanged="OnVideoHostSizeChanged">
+            <!-- 画布子窗口带 WS_EX_TRANSPARENT，点击会落到这层，用来做「点一下暂停」 -->
+            <Grid x:Name="VideoHost" Grid.Column="0" Background="Black" SizeChanged="OnVideoHostSizeChanged"
+                  MouseLeftButtonUp="OnVideoAreaClick">
                 <local:VideoSurface x:Name="Surface"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
@@ -321,7 +323,13 @@
                                 <Style TargetType="ListBoxItem">
                                     <Setter Property="Margin" Value="0,0,6,6" />
                                     <Setter Property="Padding" Value="0" />
-                                    <Setter Property="Focusable" Value="False" />
+                                    <!--
+                                        这里千万别设 Focusable=False！
+                                        WPF 的 ListBoxItem 是「先 Focus() 成功才改选中」，
+                                        Focusable=False 会让 Focus() 返回 false，点击永远选不中，
+                                        SelectionChanged 也就不触发 —— 表现就是「点封面没反应」。
+                                        想要没有虚线焦点框，改模板就行，不用动 Focusable。
+                                    -->
                                     <Setter Property="Template">
                                         <Setter.Value>
                                             <ControlTemplate TargetType="ListBoxItem">

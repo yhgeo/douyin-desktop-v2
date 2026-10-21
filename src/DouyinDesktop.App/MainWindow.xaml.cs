@@ -79,10 +79,6 @@ public partial class MainWindow : Window
         CommentList.ItemsSource = _commentVms;
         _client.Log += msg => Dispatcher.BeginInvoke(() => PushStatus(msg));
         Surface.HandleCreated += OnSurfaceReady;
-        Surface.Clicked += async (_, _) =>
-        {
-            if (_mpv is not null) await _mpv.TogglePauseAsync();
-        };
     }
 
     /// <summary>
@@ -98,6 +94,24 @@ public partial class MainWindow : Window
         base.OnSourceInitialized(e);
         var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
         ImmAssociateContext(hwnd, IntPtr.Zero);
+    }
+
+    /// <summary>
+    /// 点画面暂停 / 继续。
+    ///
+    /// 视频画布那个 Win32 子窗口带 WS_EX_TRANSPARENT（收不到真实鼠标消息），
+    /// 点击会落到 WPF 层，由 VideoHost 的 MouseLeftButtonUp 冒泡到这里。
+    /// 图集模式下不处理——图集没有画面可暂停。
+    /// </summary>
+    private async void OnVideoAreaClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_imageMode || _mpv is null) return;
+
+        await _mpv.TogglePauseAsync();
+
+        // mpv 的 pause 是异步事件回来的，等一拍再读才准
+        await Task.Delay(120);
+        AppLog.Write($"点画面：暂停={_mpv.IsPaused}");
     }
 
     [System.Runtime.InteropServices.DllImport("imm32.dll")]

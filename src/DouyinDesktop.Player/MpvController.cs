@@ -14,7 +14,7 @@ public sealed record VideoStats(
 {
     public static readonly VideoStats Empty = new(0, 0, 0, 0, "", "", "");
 
-    public string ResolutionText => Width > 0 ? $"{Width}×{Height}" : "—";
+    public string ResolutionText => Width > 0 && Height > 0 ? $"{Width}×{Height}" : "—";
 
     public string FpsText => Fps > 0 ? $"{Fps:0.##} fps" : "—";
 

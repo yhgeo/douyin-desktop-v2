@@ -21,19 +21,22 @@ public sealed class VideoSurface : HwndHost
     public IntPtr VideoHandle => _hwnd;
     public bool IsHandleCreated => _hwnd != IntPtr.Zero;
 
-    /// <summary>子窗口创建完成。mpv 只能在这之后启动。</summary>
-    public event EventHandler<IntPtr>? HandleCreated;
-
     /// <summary>
-    /// 视频区被点了。HwndHost 是独立 Win32 窗口，WPF 收不到鼠标事件，
-    /// 只能在 WndProc 里拦下来转发。
+    /// 子窗口创建完成。mpv 只能在这之后启动。
     /// </summary>
-    public event EventHandler? Clicked;
+    public event EventHandler<IntPtr>? HandleCreated;
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
+        // WS_EX_TRANSPARENT：让这个子窗口对鼠标「透明」，点击直接落到下面的 WPF 窗口。
+        //
+        // 为什么必须这样：实测这个 static 子窗口收不到真实鼠标消息——WindowFromPoint
+        // 能命中它、SendMessage 打进去也能正常走窗口过程（暂停逻辑本身是好的），
+        // 但真实点击就是不进来，连 WM_MOUSEACTIVATE 都没有。
+        // 而主窗口的 WPF 点击一直是正常的。所以干脆让它退出命中测试，
+        // 点击交给 WPF 层处理（VideoHost 的 MouseLeftButtonUp）。
         _hwnd = Native.CreateWindowEx(
-            0, "static", string.Empty,
+            Native.WS_EX_TRANSPARENT, "static", string.Empty,
             Native.WS_CHILD | Native.WS_VISIBLE | Native.WS_CLIPCHILDREN | Native.WS_CLIPSIBLINGS,
             0, 0, Math.Max(1, (int)ActualWidth), Math.Max(1, (int)ActualHeight),
             hwndParent.Handle, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
@@ -70,10 +73,6 @@ public sealed class VideoSurface : HwndHost
         {
             switch (msg)
             {
-                case Native.WM_LBUTTONDOWN:
-                    Clicked?.Invoke(this, EventArgs.Empty);
-                    return IntPtr.Zero;
-
                 case Native.WM_ERASEBKGND:
                     FillBlack(hWnd);
                     return new IntPtr(1);
@@ -115,10 +114,10 @@ public sealed class VideoSurface : HwndHost
         public const int WS_VISIBLE = 0x10000000;
         public const int WS_CLIPCHILDREN = 0x02000000;
         public const int WS_CLIPSIBLINGS = 0x04000000;
+        public const int WS_EX_TRANSPARENT = 0x00000020;
 
         public const uint WM_PAINT = 0x000F;
         public const uint WM_ERASEBKGND = 0x0014;
-        public const uint WM_LBUTTONDOWN = 0x0201;
 
         public const int GWLP_WNDPROC = -4;
 
