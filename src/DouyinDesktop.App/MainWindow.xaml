@@ -67,32 +67,45 @@
                 <local:VideoSurface x:Name="Surface"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
+
+                <!-- 图集作品：把 Surface 隐藏后用这层显示图片（HwndHost 会盖住 WPF 内容） -->
+                <Grid x:Name="ImageLayer" Visibility="Collapsed" Background="Black">
+                    <Image x:Name="ImageView" Stretch="Uniform" />
+
+                    <Border HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                            Margin="0,0,0,26" Background="#B0000000" CornerRadius="12" Padding="12,5">
+                        <TextBlock x:Name="ImageIndexText" Text="1 / 1"
+                                   FontSize="12" Foreground="White" />
+                    </Border>
+                </Grid>
             </Grid>
 
             <!-- 信息栏 -->
             <Border x:Name="SidePanel" Grid.Column="1" Width="384"
                     Background="{StaticResource PanelBrush}"
                     BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
-                <Grid Margin="28,30,28,22">
+                <Grid Margin="28,26,28,22">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <!-- 顶部：推荐 + 序号 -->
-                    <DockPanel Grid.Row="0" Margin="0,0,0,22">
-                        <Ellipse Width="7" Height="7" Fill="{StaticResource AccentBrush}"
-                                 VerticalAlignment="Center" DockPanel.Dock="Left" />
-                        <TextBlock x:Name="TabLabel" Text="推荐" Margin="8,0,0,0"
-                                   FontSize="13" Foreground="{StaticResource SubTextBrush}"
-                                   VerticalAlignment="Center" />
+                    <!-- Tab：详情 / 评论 -->
+                    <Grid Grid.Row="0" Margin="0,0,0,20">
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="TabDetail" Content="详情" Tag="active"
+                                    Style="{StaticResource TabButton}" Click="OnTabDetailClick" />
+                            <Button x:Name="TabComments" Content="评论"
+                                    Style="{StaticResource TabButton}" Click="OnTabCommentsClick" />
+                        </StackPanel>
                         <TextBlock x:Name="IndexLabel" Text="" HorizontalAlignment="Right"
-                                   Style="{StaticResource Caption}" VerticalAlignment="Center" />
-                    </DockPanel>
+                                   VerticalAlignment="Top" Margin="0,2,0,0"
+                                   Style="{StaticResource Caption}" />
+                    </Grid>
 
-                    <!-- 内容（窗口矮时可滚动） -->
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                    <!-- 详情 -->
+                    <ScrollViewer x:Name="DetailPane" Grid.Row="1" VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                         <StackPanel>
                             <TextBlock x:Name="AuthorText" Text="正在连接…" FontSize="22"
@@ -109,6 +122,42 @@
 
                             <TextBlock x:Name="MusicText" Style="{StaticResource Caption}"
                                        TextWrapping="Wrap" Margin="0,0,0,4" />
+
+                            <!-- 技术参数：来自 mpv 的实时属性，不是接口返回值 -->
+                            <Grid Margin="0,16,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="56" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="21" />
+                                    <RowDefinition Height="21" />
+                                    <RowDefinition Height="21" />
+                                    <RowDefinition Height="21" />
+                                    <RowDefinition Height="21" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="分辨率" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="TechRes" Grid.Row="0" Grid.Column="1" Text="—"
+                                           Style="{StaticResource Caption}" Foreground="#C8C8D2" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="帧率" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="TechFps" Grid.Row="1" Grid.Column="1" Text="—"
+                                           Style="{StaticResource Caption}" Foreground="#C8C8D2" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="码率" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="TechBitrate" Grid.Row="2" Grid.Column="1" Text="—"
+                                           Style="{StaticResource Caption}" Foreground="#C8C8D2" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="编码" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="TechCodec" Grid.Row="3" Grid.Column="1" Text="—"
+                                           Style="{StaticResource Caption}" Foreground="#C8C8D2"
+                                           TextTrimming="CharacterEllipsis" />
+
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="解码" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="TechHwdec" Grid.Row="4" Grid.Column="1" Text="—"
+                                           Style="{StaticResource Caption}" Foreground="#C8C8D2" />
+                            </Grid>
 
                             <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,22,0,22" />
 
@@ -129,16 +178,17 @@
                                     <RowDefinition Height="26" />
                                     <RowDefinition Height="26" />
                                     <RowDefinition Height="26" />
+                                    <RowDefinition Height="26" />
                                 </Grid.RowDefinitions>
 
-                                <TextBlock Grid.Row="0" Grid.Column="0" Text="↑ ↓" Style="{StaticResource Caption}" />
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="↑↓ / WS" Style="{StaticResource Caption}" />
                                 <TextBlock Grid.Row="0" Grid.Column="1" Text="上一条 / 下一条" Style="{StaticResource Caption}" />
 
                                 <TextBlock Grid.Row="1" Grid.Column="0" Text="空格" Style="{StaticResource Caption}" />
                                 <TextBlock Grid.Row="1" Grid.Column="1" Text="暂停 / 继续" Style="{StaticResource Caption}" />
 
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="← →" Style="{StaticResource Caption}" />
-                                <TextBlock Grid.Row="2" Grid.Column="1" Text="快退 / 快进 5 秒" Style="{StaticResource Caption}" />
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="←→ / AD" Style="{StaticResource Caption}" />
+                                <TextBlock Grid.Row="2" Grid.Column="1" Text="快退快进 5 秒 / 图集翻页" Style="{StaticResource Caption}" />
 
                                 <TextBlock Grid.Row="3" Grid.Column="0" Text="M" Style="{StaticResource Caption}" />
                                 <TextBlock Grid.Row="3" Grid.Column="1" Text="静音" Style="{StaticResource Caption}" />
@@ -151,9 +201,42 @@
 
                                 <TextBlock Grid.Row="6" Grid.Column="0" Text="L" Style="{StaticResource Caption}" />
                                 <TextBlock Grid.Row="6" Grid.Column="1" Text="登录（扫码）" Style="{StaticResource Caption}" />
+
+                                <TextBlock Grid.Row="7" Grid.Column="0" Text="Tab" Style="{StaticResource Caption}" />
+                                <TextBlock Grid.Row="7" Grid.Column="1" Text="详情 / 评论" Style="{StaticResource Caption}" />
                             </Grid>
                         </StackPanel>
                     </ScrollViewer>
+
+                    <!-- 评论 -->
+                    <Grid x:Name="CommentsPane" Grid.Row="1" Visibility="Collapsed">
+                        <ScrollViewer x:Name="CommentScroll" VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      ScrollChanged="OnCommentScroll">
+                            <ItemsControl x:Name="CommentList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,0,0,16">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding Nickname}" FontSize="12"
+                                                           Foreground="#9A9AA6" />
+                                                <TextBlock Text="{Binding MetaText}" FontSize="11"
+                                                           Foreground="#5A5A66" Margin="8,0,0,0" />
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                                       FontSize="13" LineHeight="21" Margin="0,5,0,0" />
+                                            <TextBlock Text="{Binding LikeText}" FontSize="11"
+                                                       Foreground="#5A5A66" Margin="0,5,0,0" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+
+                        <TextBlock x:Name="CommentEmpty" Text="暂无评论"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Style="{StaticResource Caption}" Visibility="Collapsed" />
+                    </Grid>
 
                     <!-- 底部：进度 + 状态 -->
                     <StackPanel Grid.Row="2" Margin="0,20,0,0">

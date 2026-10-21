@@ -232,6 +232,99 @@ public sealed class DouyinClient : IDisposable
         return list;
     }
 
+    // ================= 评论 =================
+
+    /// <summary>
+    /// 拉一级评论。cursor 传上一页返回的 Cursor，首页传 0。
+    /// 登录态下成功率更高（游客态经常只给一部分）。
+    /// </summary>
+    public async Task<CommentPage> GetCommentsAsync(
+        string awemeId, long cursor = 0, int count = 20, CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("aweme_id", awemeId),
+            new("cursor", cursor.ToString()),
+            new("count", count.ToString()),
+            new("item_type", "0"),
+            // 这两个是空值字段，浏览器确实会发；签名输入里也不能少
+            new("whale_cut_token", ""),
+            new("cut_version", "1"),
+            new("rcFT", ""),
+        };
+        ps.AddRange(_profile.PlatformParams());
+        ps.Add(new("webid", _profile.WebId));
+        ps.Add(new("msToken", session.MsToken));
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+        string url = $"https://www.douyin.com/aweme/v1/web/comment/list/?{query}" +
+                     $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        AddBrowserHeaders(req, session);
+        // 评论接口的 Referer 必须是作品页，首页 Referer 会被挡
+        req.Headers.Remove("Referer");
+        req.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/video/{awemeId}");
+
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                Log?.Invoke($"评论 HTTP {(int)resp.StatusCode}");
+                return CommentPage.Empty;
+            }
+
+            var page = ParseComments(body, cursor, count);
+            Log?.Invoke($"评论 {page.Comments.Count} 条 / 共 {page.Total}");
+            return page;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            Log?.Invoke("评论请求失败：" + ex.Message);
+            return CommentPage.Empty;
+        }
+    }
+
+    private static CommentPage ParseComments(string json, long cursor, int count)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json.TrimStart()[0] != '{') return CommentPage.Empty;
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        if (!root.TryGetProperty("comments", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return CommentPage.Empty;
+
+        var list = new List<Comment>();
+        foreach (var c in arr.EnumerateArray())
+        {
+            if (c.ValueKind != JsonValueKind.Object) continue;
+            var item = c.Deserialize<Comment>(JsonOptions);
+            if (item is not null && !string.IsNullOrEmpty(item.Id)) list.Add(item);
+        }
+
+        bool hasMore = root.TryGetProperty("has_more", out var hm)
+                       && hm.ValueKind == JsonValueKind.Number && hm.GetInt32() != 0;
+        long next = root.TryGetProperty("cursor", out var cur) && cur.ValueKind == JsonValueKind.Number
+            ? cur.GetInt64()
+            : cursor + count;
+        long total = root.TryGetProperty("total", out var t) && t.ValueKind == JsonValueKind.Number
+            ? t.GetInt64()
+            : 0;
+
+        return new CommentPage(list, hasMore, next, total);
+    }
+
     // ================= 播放 =================
 
     /// <summary>

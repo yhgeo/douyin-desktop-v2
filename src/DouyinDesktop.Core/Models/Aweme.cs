@@ -67,11 +67,25 @@ public sealed class VideoInfo
     [JsonPropertyName("ratio")] public string Ratio { get; init; } = "";
     [JsonPropertyName("play_addr")] public PlayAddr? PlayAddr { get; init; }
     [JsonPropertyName("cover")] public UrlList? Cover { get; init; }
+    [JsonPropertyName("bit_rate")] public List<BitRateInfo>? BitRates { get; init; }
 
     [JsonIgnore] public string CoverUrl => Cover?.First ?? "";
 
     /// <summary>宽高比，用于界面留黑边的计算；拿不到就给竖屏默认值。</summary>
     [JsonIgnore] public double Aspect => Width > 0 && Height > 0 ? (double)Width / Height : 9.0 / 16.0;
+
+    /// <summary>接口给的最高码率。mpv 的 video-bitrate 对网络流不总上报，用它兜底。</summary>
+    [JsonIgnore] public long MaxBitRate => BitRates is { Count: > 0 } ? BitRates.Max(x => x.BitRate) : 0;
+}
+
+/// <summary>清晰度档位。bit_rate 单位是 bps。</summary>
+public sealed class BitRateInfo
+{
+    [JsonPropertyName("bit_rate")] public long BitRate { get; init; }
+    [JsonPropertyName("gear_name")] public string GearName { get; init; } = "";
+    [JsonPropertyName("quality_type")] public int QualityType { get; init; }
+    [JsonPropertyName("is_h265")] public int IsH265 { get; init; }
+    [JsonPropertyName("play_addr")] public PlayAddr? PlayAddr { get; init; }
 }
 
 /// <summary>

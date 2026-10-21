@@ -4,6 +4,43 @@ using System.Text.Json;
 
 namespace DouyinDesktop.Player;
 
+/// <summary>
+/// 播放中视频的技术参数，来自 mpv 的实时属性（不是接口返回值）。
+/// 接口给的宽高是"文件标称值"，mpv 给的才是真正解出来的。
+/// </summary>
+public sealed record VideoStats(
+    int Width, int Height, double Fps, long BitrateBps,
+    string VideoCodec, string AudioCodec, string Hwdec)
+{
+    public static readonly VideoStats Empty = new(0, 0, 0, 0, "", "", "");
+
+    public string ResolutionText => Width > 0 ? $"{Width}×{Height}" : "—";
+
+    public string FpsText => Fps > 0 ? $"{Fps:0.##} fps" : "—";
+
+    public string BitrateText => BitrateBps switch
+    {
+        >= 1_000_000 => $"{BitrateBps / 1_000_000.0:0.##} Mbps",
+        > 0 => $"{BitrateBps / 1000.0:0} kbps",
+        _ => "—",
+    };
+
+    public string CodecText
+    {
+        get
+        {
+            // mpv 给的编码名很长（"H264 / AVC / MPEG-4 AVC / MPEG-4 part 10"），
+            // 侧栏放不下，只留第一段
+            static string Short(string s) => string.IsNullOrEmpty(s) ? "" : s.Split('/')[0].Trim();
+
+            var parts = new[] { Short(VideoCodec), Short(AudioCodec) }.Where(x => x.Length > 0).ToList();
+            return parts.Count > 0 ? string.Join(" / ", parts) : "—";
+        }
+    }
+
+    public string HwdecText => string.IsNullOrEmpty(Hwdec) || Hwdec == "no" ? "软解" : Hwdec;
+}
+
 public sealed class MpvOptions
 {
     /// <summary>mpv.exe 的完整路径。</summary>
@@ -46,6 +83,15 @@ public sealed class MpvController : IAsyncDisposable
     /// </summary>
     private volatile bool _endHandled;
 
+    // 视频技术参数：mpv 的属性是零散上报的，先攒在字段里，再合并成一次事件
+    private int _vWidth, _vHeight;
+    private double _vFps;
+    private long _vBitrate;
+    private string _vCodec = "";
+    private string _aCodec = "";
+    private string _hwdec = "";
+    private DateTime _lastStatsAt = DateTime.MinValue;
+
     public event Action<double>? TimePosChanged;
     public event Action<double>? DurationChanged;
     public event Action<bool>? PausedChanged;
@@ -58,6 +104,8 @@ public sealed class MpvController : IAsyncDisposable
     public event Action? FileLoaded;
     /// <summary>mpv 进程挂了。</summary>
     public event Action<string>? Crashed;
+    /// <summary>视频技术参数就绪/更新（分辨率、帧率、码率、编码、硬解）。</summary>
+    public event Action<VideoStats>? StatsChanged;
     public event Action<string>? Log;
 
     public bool IsRunning => !_disposed && !_process.HasExited;
@@ -145,7 +193,15 @@ public sealed class MpvController : IAsyncDisposable
 
     private async Task SubscribeAsync()
     {
-        foreach (string prop in new[] { "time-pos", "duration", "pause", "eof-reached", "paused-for-cache" })
+        string[] props =
+        {
+            "time-pos", "duration", "pause", "eof-reached", "paused-for-cache",
+            // 技术参数
+            "width", "height", "container-fps", "video-bitrate",
+            "video-codec", "audio-codec", "hwdec-current",
+        };
+
+        foreach (string prop in props)
         {
             try { await _ipc.ObservePropertyAsync(prop); }
             catch (Exception ex) { Log?.Invoke($"订阅 {prop} 失败：{ex.Message}"); }
@@ -158,6 +214,11 @@ public sealed class MpvController : IAsyncDisposable
     {
         Log?.Invoke("loadfile " + url);
         _endHandled = false;
+        // 换片子先把上一部的参数清掉，否则界面会短暂显示上一条的分辨率
+        _vWidth = _vHeight = 0;
+        _vFps = 0;
+        _vBitrate = 0;
+        _vCodec = _aCodec = _hwdec = "";
         await _ipc.CommandAsync("loadfile", url, "replace");
         if (autoPlay) await _ipc.CommandAsync("set", "pause", "no");
     }
@@ -237,7 +298,51 @@ public sealed class MpvController : IAsyncDisposable
                     PlaybackEnded?.Invoke();
                 }
                 break;
+
+            // ---- 技术参数 ----
+            case "width":
+                if (data is { ValueKind: JsonValueKind.Number } w) { _vWidth = w.GetInt32(); PushStats(); }
+                break;
+
+            case "height":
+                if (data is { ValueKind: JsonValueKind.Number } h) { _vHeight = h.GetInt32(); PushStats(); }
+                break;
+
+            case "container-fps":
+                if (data is { ValueKind: JsonValueKind.Number } f) { _vFps = f.GetDouble(); PushStats(); }
+                break;
+
+            case "video-bitrate":
+                if (data is { ValueKind: JsonValueKind.Number } br) { _vBitrate = br.GetInt64(); PushStats(); }
+                break;
+
+            case "video-codec":
+                _vCodec = data is { ValueKind: JsonValueKind.String } vc ? vc.GetString() ?? "" : "";
+                PushStats();
+                break;
+
+            case "audio-codec":
+                _aCodec = data is { ValueKind: JsonValueKind.String } ac ? ac.GetString() ?? "" : "";
+                PushStats();
+                break;
+
+            case "hwdec-current":
+                _hwdec = data is { ValueKind: JsonValueKind.String } hd ? hd.GetString() ?? "" : "";
+                PushStats();
+                break;
         }
+    }
+
+    /// <summary>
+    /// mpv 是逐个属性上报的，直接转发会连刷五六次界面。
+    /// 这里攒一下，700ms 内只发一次。
+    /// </summary>
+    private void PushStats(bool force = false)
+    {
+        var now = DateTime.UtcNow;
+        if (!force && (now - _lastStatsAt).TotalMilliseconds < 700) return;
+        _lastStatsAt = now;
+        StatsChanged?.Invoke(new VideoStats(_vWidth, _vHeight, _vFps, _vBitrate, _vCodec, _aCodec, _hwdec));
     }
 
     private void OnEvent(string name, JsonElement root)
@@ -247,6 +352,8 @@ public sealed class MpvController : IAsyncDisposable
             case "file-loaded":
                 Log?.Invoke("file-loaded");
                 FileLoaded?.Invoke();
+                // 属性是陆续上报的，等一秒再强制推一次，保证参数齐了
+                _ = Task.Delay(1200).ContinueWith(_ => PushStats(force: true));
                 break;
 
             case "end-file":

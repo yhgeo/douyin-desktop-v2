@@ -41,6 +41,39 @@ public sealed class DeviceProfile
     }
 
     /// <summary>
+    /// 通用平台参数。推荐流之外的接口（评论等）都用这一组，
+    /// 对应参考实现里的 with_platform()。
+    /// </summary>
+    public List<KeyValuePair<string, string>> PlatformParams()
+    {
+        string bv = BrowserVersion;
+        return new List<KeyValuePair<string, string>>
+        {
+            new("pc_client_type", "1"),
+            new("version_code", "170400"),
+            new("version_name", "17.4.0"),
+            new("cookie_enabled", "true"),
+            new("screen_width", ScreenWidth.ToString()),
+            new("screen_height", ScreenHeight.ToString()),
+            new("browser_language", "zh-CN"),
+            new("browser_platform", "Win32"),
+            new("browser_name", "Chrome"),
+            new("browser_version", bv),
+            new("browser_online", "true"),
+            new("engine_name", "Blink"),
+            new("engine_version", bv),
+            new("os_name", "Windows"),
+            new("os_version", "10"),
+            new("cpu_core_num", CpuCores.ToString()),
+            new("device_memory", DeviceMemory.ToString()),
+            new("platform", "PC"),
+            new("downlink", "10"),
+            new("effective_type", "4g"),
+            new("round_trip_time", "0"),
+        };
+    }
+
+    /// <summary>
     /// 推荐流参数。顺序敏感——签名算的是这个顺序的原始串，改顺序签名就对不上。
     /// presented_ids 用来让服务端避开已推过的内容。
     /// </summary>

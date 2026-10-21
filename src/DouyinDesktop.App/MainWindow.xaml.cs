@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media.Imaging;
 using DouyinDesktop.Core.Api;
 using DouyinDesktop.Core.Models;
 using DouyinDesktop.Player;
@@ -14,6 +16,13 @@ public partial class MainWindow : Window
     private readonly VideoStreamProxy _proxy = VideoStreamProxy.Start();
     private readonly List<Aweme> _items = new();
     private readonly HashSet<string> _presented = new();
+
+    // 图集：图片走单独的 HttpClient，缓存最近看过的几十张
+    private readonly HttpClient _imageHttp = CreateImageHttp();
+    private readonly Dictionary<string, byte[]> _imageCache = new();
+    private bool _imageMode;
+    private Aweme? _imageItem;
+    private int _imageIndex;
 
     private MpvController? _mpv;
     private int _index = -1;
@@ -31,6 +40,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _prefetchCts;
     private int _consecutiveFailures;
     private bool _lastFromCache;
+    private long _apiBitrate;
 
     public MainWindow()
     {
@@ -64,9 +74,61 @@ public partial class MainWindow : Window
         LayoutVideo();
         SetStatus("正在获取推荐…");
 
+        InjectDemoImageIfRequested();
+
         // 播放器和推荐流并行准备：谁先好都不等谁
         _ = LoadFeedAsync();
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 调试入口：--demo-image 会在列表最前面插一条本地图集。
+    /// 推荐流（module/feed）实测只返回视频，扫 48 条 images 字段一条都没有，
+    /// 所以图集 UI 只能靠注入数据验证。正常启动不会走这里。
+    /// </summary>
+    private void InjectDemoImageIfRequested()
+    {
+        if (!Environment.GetCommandLineArgs().Contains("--demo-image")) return;
+
+        string? root = FindProjectRoot();
+        if (root is null) { SetStatus("找不到项目根目录，无法加载演示图集"); return; }
+
+        string dir = Path.Combine(root, "tmp", "demo");
+        string Url(int i) => new Uri(Path.Combine(dir, $"img{i}.png")).AbsoluteUri;
+
+        if (!File.Exists(Path.Combine(dir, "img1.png")))
+        {
+            SetStatus("演示图片不存在：" + dir);
+            return;
+        }
+
+        _items.Insert(0, new Aweme
+        {
+            Id = "demo-image",
+            Desc = "【图集测试】本地注入的假数据，用于验证图集显示与左右翻页",
+            Author = new Author { Nickname = "图集测试" },
+            Statistics = new Statistics { DiggCount = 1234, CommentCount = 56, ShareCount = 7 },
+            Images = new List<ImageInfo>
+            {
+                new() { Width = 900, Height = 1200, UrlList = new() { Url(1) } },
+                new() { Width = 900, Height = 1200, UrlList = new() { Url(2) } },
+                new() { Width = 900, Height = 1200, UrlList = new() { Url(3) } },
+            },
+        });
+
+        PushStatus("已注入演示图集");
+    }
+
+    private static string? FindProjectRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (int i = 0; i < 10 && dir is not null; i++, dir = dir.Parent)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "PLAN.md"))
+                && Directory.Exists(Path.Combine(dir.FullName, "src")))
+                return dir.FullName;
+        }
+        return null;
     }
 
     private async void OnSurfaceReady(object? sender, IntPtr hwnd)
@@ -101,6 +163,7 @@ public partial class MainWindow : Window
             mpv.FileLoaded += OnFileLoaded;
             mpv.PlaybackEnded += OnPlaybackEnded;
             mpv.FileFailed += OnFileFailed;
+            mpv.StatsChanged += s => Dispatcher.BeginInvoke(() => UpdateTechStats(s));
             mpv.PausedChanged += p => Dispatcher.BeginInvoke(() => SetStatus(p ? "已暂停" : "播放中"));
             mpv.TimePosChanged += OnTimePos;
             mpv.DurationChanged += OnDuration;
@@ -187,14 +250,28 @@ public partial class MainWindow : Window
         if (index < 0 || index >= _items.Count) return;
 
         var item = _items[index];
+
+        // 图集作品没有视频流，走图片展示
+        if (item.IsImagePost)
+        {
+            _index = index;
+            ShowInfo(item);
+            await ShowImagePostAsync(item);
+            UpdateIndexLabel();
+            PrefetchAhead(index, 2);
+            EnsureBuffer();
+            return;
+        }
+
         if (!item.IsPlayable && !force)
         {
-            // 图集或没有 uri 的条目：跳过，避免卡住
+            // 既不是视频也不是图集：跳过，避免卡住
             PushStatus($"跳过不可播条目 {item.Id}");
             if (index < _items.Count - 1) { await PlayIndexAsync(index + 1); return; }
             return;
         }
 
+        ExitImageMode();
         _index = index;
         ShowInfo(item);
 
@@ -227,6 +304,201 @@ public partial class MainWindow : Window
         PrefetchAhead(index, 2);
         UpdateIndexLabel();
         EnsureBuffer();
+    }
+
+    // ================= 评论 =================
+
+    private long _commentCursor;
+    private bool _commentsLoading;
+    private bool _commentsHasMore;
+    private string _commentAwemeId = "";
+
+    private string CurrentId
+        => _index >= 0 && _index < _items.Count ? _items[_index].Id : "";
+
+    private void OnTabDetailClick(object sender, RoutedEventArgs e) => SwitchTab(comments: false);
+
+    private void OnTabCommentsClick(object sender, RoutedEventArgs e) => SwitchTab(comments: true);
+
+    private void SwitchTab(bool comments)
+    {
+        TabDetail.Tag = comments ? null : "active";
+        TabComments.Tag = comments ? "active" : null;
+        DetailPane.Visibility = comments ? Visibility.Collapsed : Visibility.Visible;
+        CommentsPane.Visibility = comments ? Visibility.Visible : Visibility.Collapsed;
+
+        // 只在第一次切到评论页时拉，之后靠滚动加载更多
+        if (comments) _ = LoadCommentsAsync(reset: _commentAwemeId != CurrentId);
+    }
+
+    private async Task LoadCommentsAsync(bool reset)
+    {
+        string id = CurrentId;
+        if (string.IsNullOrEmpty(id) || _commentsLoading) return;
+
+        if (reset || id != _commentAwemeId)
+        {
+            _commentAwemeId = id;
+            _commentCursor = 0;
+            _commentsHasMore = true;
+            CommentList.Items.Clear();
+            CommentEmpty.Visibility = Visibility.Collapsed;
+        }
+        if (!_commentsHasMore) return;
+
+        _commentsLoading = true;
+        try
+        {
+            var page = await _client.GetCommentsAsync(id, _commentCursor);
+
+            // 加载期间用户可能已经切走了，别把上一条的评论塞进来
+            if (id != CurrentId) return;
+
+            foreach (var c in page.Comments) CommentList.Items.Add(c);
+            _commentCursor = page.Cursor;
+            _commentsHasMore = page.HasMore;
+
+            TabComments.Content = page.Total > 0 ? $"评论 {Count(page.Total)}" : "评论";
+
+            if (CommentList.Items.Count == 0)
+            {
+                CommentEmpty.Text = page.Total == 0 ? "暂无评论" : "评论加载失败（可能被风控）";
+                CommentEmpty.Visibility = Visibility.Visible;
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus("评论加载失败：" + ex.Message);
+        }
+        finally
+        {
+            _commentsLoading = false;
+        }
+    }
+
+    /// <summary>滚到接近底部就续一页。</summary>
+    private void OnCommentScroll(object sender, System.Windows.Controls.ScrollChangedEventArgs e)
+    {
+        if (e.ExtentHeight <= 0) return;
+        if (e.VerticalOffset + e.ViewportHeight < e.ExtentHeight - 240) return;
+        if (_commentsHasMore && !_commentsLoading) _ = LoadCommentsAsync(reset: false);
+    }
+
+    // ================= 图集 =================
+
+    private static HttpClient CreateImageHttp()
+    {
+        var handler = new HttpClientHandler
+        {
+            UseCookies = false,
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+        };
+        var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
+        http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", DeviceProfile.DefaultUserAgent);
+        http.DefaultRequestHeaders.TryAddWithoutValidation("Referer", "https://www.douyin.com/");
+        return http;
+    }
+
+    private async Task ShowImagePostAsync(Aweme item)
+    {
+        _imageMode = true;
+        _imageItem = item;
+        _imageIndex = 0;
+
+        // HwndHost 永远盖在 WPF 内容之上，必须先把它藏起来，图片才看得见
+        Surface.Visibility = Visibility.Collapsed;
+        ImageLayer.Visibility = Visibility.Visible;
+
+        if (_mpv is not null)
+        {
+            try { await _mpv.StopAsync(); } catch { /* 已经停了 */ }
+        }
+
+        await LoadImageAsync();
+    }
+
+    private async Task LoadImageAsync()
+    {
+        if (_imageItem?.Images is not { Count: > 0 } images) return;
+        if (_imageIndex < 0 || _imageIndex >= images.Count) return;
+
+        var info = images[_imageIndex];
+        ImageIndexText.Text = $"{_imageIndex + 1} / {images.Count}";
+
+        try
+        {
+            byte[] bytes = await GetImageBytesAsync(info);
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.StreamSource = new MemoryStream(bytes);
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.EndInit();
+            bmp.Freeze();
+            ImageView.Source = bmp;
+        }
+        catch (Exception ex)
+        {
+            SetStatus("图片加载失败：" + ex.Message);
+        }
+    }
+
+    private async Task<byte[]> GetImageBytesAsync(ImageInfo info)
+    {
+        var urls = info.UrlList ?? new List<string>();
+        foreach (string url in urls)
+        {
+            if (string.IsNullOrEmpty(url)) continue;
+            if (_imageCache.TryGetValue(url, out var cached)) return cached;
+
+            try
+            {
+                // 调试用的本地图集（--demo-image）走文件读取，其余走 HTTP
+                if (url.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+                {
+                    string local = new Uri(url).LocalPath;
+                    if (!File.Exists(local)) continue;
+                    byte[] localBytes = await File.ReadAllBytesAsync(local);
+                    _imageCache[url] = localBytes;
+                    return localBytes;
+                }
+
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                using var resp = await _imageHttp.SendAsync(req);
+                if (!resp.IsSuccessStatusCode) continue;
+
+                byte[] bytes = await resp.Content.ReadAsByteArrayAsync();
+                if (bytes.Length == 0) continue;
+
+                if (_imageCache.Count > 60) _imageCache.Clear();
+                _imageCache[url] = bytes;
+                return bytes;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+            {
+                // 这个 CDN 不行就试下一个地址
+            }
+        }
+        throw new InvalidOperationException("所有图片地址都不可用");
+    }
+
+    private async Task StepImageAsync(int delta)
+    {
+        if (!_imageMode || _imageItem?.Images is not { Count: > 0 } images) return;
+
+        int next = Math.Clamp(_imageIndex + delta, 0, images.Count - 1);
+        if (next == _imageIndex) return;
+        _imageIndex = next;
+        await LoadImageAsync();
+    }
+
+    private void ExitImageMode()
+    {
+        if (!_imageMode) return;
+        _imageMode = false;
+        _imageItem = null;
+        ImageView.Source = null;
+        ImageLayer.Visibility = Visibility.Collapsed;
+        Surface.Visibility = Visibility.Visible;
     }
 
     /// <summary>
@@ -344,9 +616,44 @@ public partial class MainWindow : Window
             ? $"♪ {item.Music.Title} — {item.Music.Author}"
             : "";
 
-        _aspect = item.Video?.Aspect ?? 9.0 / 16.0;
+        ResetTechStats();
+        _apiBitrate = item.Video?.MaxBitRate ?? 0;
+        TechBitrate.Text = FormatBitrate(_apiBitrate);
+
+        // 图集用第一张图的宽高比，视频用视频的
+        _aspect = item.IsImagePost && item.Images is { Count: > 0 } imgs
+            ? (imgs[0].Width > 0 && imgs[0].Height > 0
+                ? (double)imgs[0].Width / imgs[0].Height
+                : 3.0 / 4.0)
+            : item.Video?.Aspect ?? 9.0 / 16.0;
+
         LayoutVideo();
         UpdateIndexLabel();
+
+        // 正在看评论的话，切作品就换成新作品的评论
+        if (CommentsPane.Visibility == Visibility.Visible) _ = LoadCommentsAsync(reset: true);
+    }
+
+    private void UpdateTechStats(VideoStats s)
+    {
+        TechRes.Text = s.ResolutionText;
+        TechFps.Text = s.FpsText;
+        // mpv 对网络流常常不报 video-bitrate，用接口给的档位码率兜底
+        TechBitrate.Text = s.BitrateBps > 0 ? s.BitrateText : FormatBitrate(_apiBitrate);
+        TechCodec.Text = s.CodecText;
+        TechHwdec.Text = s.HwdecText;
+    }
+
+    private static string FormatBitrate(long bps) => bps switch
+    {
+        >= 1_000_000 => $"{bps / 1_000_000.0:0.##} Mbps",
+        > 0 => $"{bps / 1000.0:0} kbps",
+        _ => "—",
+    };
+
+    private void ResetTechStats()
+    {
+        TechRes.Text = TechFps.Text = TechBitrate.Text = TechCodec.Text = TechHwdec.Text = "—";
     }
 
     private void UpdateIndexLabel()
@@ -393,12 +700,14 @@ public partial class MainWindow : Window
             {
                 case Key.Down:
                 case Key.PageDown:
+                case Key.S:
                     await NextAsync();
                     e.Handled = true;
                     break;
 
                 case Key.Up:
                 case Key.PageUp:
+                case Key.W:
                     await PrevAsync();
                     e.Handled = true;
                     break;
@@ -409,12 +718,16 @@ public partial class MainWindow : Window
                     break;
 
                 case Key.Left:
+                case Key.A:
+                    if (_imageMode) { await StepImageAsync(-1); break; }
                     if (_mpv is not null)
                         await _mpv.SeekAsync(Math.Max(0, _mpv.Position - 5));
                     e.Handled = true;
                     break;
 
                 case Key.Right:
+                case Key.D:
+                    if (_imageMode) { await StepImageAsync(1); break; }
                     if (_mpv is not null)
                         await _mpv.SeekAsync(Math.Min(_mpv.Duration, _mpv.Position + 5));
                     e.Handled = true;
@@ -437,6 +750,11 @@ public partial class MainWindow : Window
                 case Key.R:
                     SetStatus("换一批…");
                     await LoadFeedAsync(reset: true);
+                    e.Handled = true;
+                    break;
+
+                case Key.Tab:
+                    SwitchTab(CommentsPane.Visibility != Visibility.Visible);
                     e.Handled = true;
                     break;
 
