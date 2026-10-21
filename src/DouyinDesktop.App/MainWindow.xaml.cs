@@ -756,11 +756,27 @@ public partial class MainWindow : Window
 
         MusicText.Text = item.Music is { Title.Length: > 0 }
             ? $"♪ {item.Music.Title} — {item.Music.Author}"
-            : "";
+            : item.IsImagePost ? "♪ 无背景音乐" : "";
 
         ResetTechStats();
-        _apiBitrate = item.Video?.MaxBitRate ?? 0;
-        TechBitrate.Text = FormatBitrate(_apiBitrate);
+
+        if (item.IsImagePost && item.Images is { Count: > 0 } imgs0)
+        {
+            // 图集没有视频流：显示图片张数和尺寸，而不是 mpv 的分辨率/帧率
+            VideoStatsPanel.Visibility = Visibility.Collapsed;
+            ImageStatsPanel.Visibility = Visibility.Visible;
+            ImageCountText.Text = $"{imgs0.Count} 张";
+            ImageSizeText.Text = imgs0[0].Width > 0
+                ? $"{imgs0[0].Width}×{imgs0[0].Height}"
+                : "—";
+        }
+        else
+        {
+            VideoStatsPanel.Visibility = Visibility.Visible;
+            ImageStatsPanel.Visibility = Visibility.Collapsed;
+            _apiBitrate = item.Video?.MaxBitRate ?? 0;
+            TechBitrate.Text = FormatBitrate(_apiBitrate);
+        }
 
         // 评论数先用作品自带的统计值，点进评论页后再用接口返回的 total 校正
         long commentTotal = item.Statistics?.CommentCount ?? 0;
@@ -786,6 +802,9 @@ public partial class MainWindow : Window
 
     private void UpdateTechStats(VideoStats s)
     {
+        // 图集没有视频流，mpv 可能还在报上一条视频的参数
+        if (_imageMode) return;
+
         TechRes.Text = s.ResolutionText;
         TechFps.Text = s.FpsText;
         // mpv 对网络流常常不报 video-bitrate，用接口给的档位码率兜底

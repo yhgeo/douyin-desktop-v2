@@ -136,8 +136,8 @@
                             <TextBlock x:Name="MusicText" Style="{StaticResource Caption}"
                                        TextWrapping="Wrap" Margin="0,0,0,4" />
 
-                            <!-- 技术参数：来自 mpv 的实时属性，不是接口返回值 -->
-                            <Grid Margin="0,14,0,0">
+                            <!-- 视频技术参数（来自 mpv 实时属性） -->
+                            <Grid x:Name="VideoStatsPanel" Margin="0,14,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="54" />
                                     <ColumnDefinition Width="*" />
@@ -159,6 +159,28 @@
 
                                 <TextBlock Grid.Row="1" Grid.Column="0" Text="码率" Style="{StaticResource Caption}" />
                                 <TextBlock x:Name="TechBitrate" Grid.Row="1" Grid.Column="1" Text="—"
+                                           Style="{StaticResource Caption}" Foreground="#C8C8D2" />
+                            </Grid>
+
+                            <!-- 图集信息（图集没有视频流，mpv 的参数不适用） -->
+                            <Grid x:Name="ImageStatsPanel" Margin="0,14,0,0" Visibility="Collapsed">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="54" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="46" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="21" />
+                                    <RowDefinition Height="21" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="图片" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="ImageCountText" Grid.Row="0" Grid.Column="1" Text="—"
+                                           Style="{StaticResource Caption}" Foreground="#C8C8D2" />
+
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="尺寸" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="ImageSizeText" Grid.Row="0" Grid.Column="3" Text="—"
                                            Style="{StaticResource Caption}" Foreground="#C8C8D2" />
                             </Grid>
 

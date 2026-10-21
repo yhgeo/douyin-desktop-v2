@@ -46,6 +46,7 @@ if (args.Length > 0 && args[0] == "images")
         {
             if (!a.IsImagePost) continue;
             Console.WriteLine($"图集 {a.Id}  @{a.AuthorName}  {a.Images!.Count} 张  {a.Desc}");
+            Console.WriteLine($"    music = '{a.Music?.Title}' / '{a.Music?.Author}'");
             foreach (var img in a.Images.Take(3))
                 Console.WriteLine($"    {img.Width}×{img.Height}  {img.Url[..Math.Min(80, img.Url.Length)]}");
         }
