@@ -26,7 +26,7 @@ public sealed class KeyMap
         new("refresh",    "换一批推荐",   Key.R,      Array.Empty<Key>()),
         new("login",      "登录",         Key.L,      Array.Empty<Key>()),
         new("tab",        "详情 / 评论",  Key.Tab,    Array.Empty<Key>()),
-        new("author",     "看作者主页",   Key.U,      Array.Empty<Key>()),
+        new("author",     "作者主页 / 回推荐", Key.U, Array.Empty<Key>()),
         new("follow",     "关注页 / 推荐页", Key.G,   Array.Empty<Key>()),
     };
 

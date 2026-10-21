@@ -489,14 +489,7 @@ public partial class MainWindow : Window
         await PlayIndexAsync(0);
         SetStatus($"@{nickname} 的 {result.Items.Count} 条作品" +
                   (imageCount > 0 ? $"（含 {imageCount} 条图集）" : "") +
-                  "，按 R 回推荐");
-    }
-
-    private Task LoadCurrentAuthorAsync()
-    {
-        if (_index < 0 || _index >= _items.Count) return Task.CompletedTask;
-        var author = _items[_index].Author;
-        return LoadAuthorPostsAsync(author?.SecUid ?? "", author?.Nickname ?? "作者");
+                  "，再按 U 回推荐");
     }
 
     // ================= 播放 =================
@@ -1251,8 +1244,23 @@ public partial class MainWindow : Window
                     break;
 
                 case "author":
-                    // 和主页 Tab 统一：按 U 直接切过去看封面墙
-                    SwitchTab(SideTab.Profile);
+                    // U 是个开关：
+                    //   在作者流里 -> 回推荐流，并切回「详情」页
+                    //   否则       -> 切到「主页」Tab 看封面墙
+                    // 之前只有"进去"没有"出来"，刷到作者的其他视频后只能按 R 重新拉推荐，
+                    // 推荐流里已经看过的位置就丢了。
+                    if (_authorMode)
+                    {
+                        _authorMode = false;
+                        _followMode = false;
+                        await SwitchFeedAsync(_recommendFeed, "推荐");
+                        SwitchTab(SideTab.Detail);
+                        SetStatus("已回到推荐");
+                    }
+                    else
+                    {
+                        SwitchTab(SideTab.Profile);
+                    }
                     break;
 
                 case "follow":
