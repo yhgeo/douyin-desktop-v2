@@ -19,11 +19,22 @@ public sealed class DouyinSession
     public string UserAgent { get; set; } = DeviceProfile.DefaultUserAgent;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
 
+    /// <summary>
+    /// 扫码登录后从 WebView2 里整包抓下来的 Cookie（"a=1; b=2" 形式）。
+    /// 登录态的鉴权全靠它，和 ttwid 那套游客凭据是两回事，可以共存。
+    /// </summary>
+    public string LoginCookies { get; set; } = "";
+
+    [JsonIgnore] public bool IsLoggedIn => !string.IsNullOrEmpty(LoginCookies);
+
     [JsonIgnore] public bool IsComplete => !string.IsNullOrEmpty(Ttwid) && !string.IsNullOrEmpty(SvWebId);
 
-    /// <summary>超过这个时长就重新注册 ttwid，避免长期用同一个设备号。</summary>
-    [JsonIgnore] public bool IsStale => DateTimeOffset.Now - CreatedAt > TimeSpan.FromDays(7);
+    /// <summary>游客凭据用久了要换；登录态不按天数作废，等 Cookie 自己失效。</summary>
+    [JsonIgnore] public bool IsStale
+        => !IsLoggedIn && DateTimeOffset.Now - CreatedAt > TimeSpan.FromDays(7);
 
+    /// <summary>拼给请求头用的完整 Cookie 串，不落盘（由上面几个字段拼出来就行）。</summary>
+    [JsonIgnore]
     public string CookieHeader
     {
         get
@@ -31,6 +42,7 @@ public sealed class DouyinSession
             var parts = new List<string>();
             if (!string.IsNullOrEmpty(Ttwid)) parts.Add("ttwid=" + Ttwid);
             if (!string.IsNullOrEmpty(SvWebId)) parts.Add("s_v_web_id=" + SvWebId);
+            if (!string.IsNullOrEmpty(LoginCookies)) parts.Add(LoginCookies);
             return string.Join("; ", parts);
         }
     }

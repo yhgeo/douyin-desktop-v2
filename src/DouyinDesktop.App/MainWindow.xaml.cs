@@ -39,6 +39,24 @@ public partial class MainWindow : Window
         Surface.HandleCreated += OnSurfaceReady;
     }
 
+    /// <summary>
+    /// 彻底关掉主窗口的输入法。
+    ///
+    /// 只设 InputMethod.IsInputMethodEnabled 不够——那只管 WPF 的输入焦点，
+    /// 系统 IME 仍然会在窗口激活时抢单键（按 F 弹出候选框，全屏就失效了）。
+    /// ImmAssociateContext(hwnd, 0) 是直接断掉窗口和输入法上下文的关联。
+    /// 主窗口没有任何文本输入，禁用没有任何副作用。
+    /// </summary>
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        ImmAssociateContext(hwnd, IntPtr.Zero);
+    }
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll")]
+    private static extern IntPtr ImmAssociateContext(IntPtr hWnd, IntPtr hImc);
+
     // ================= 启动 =================
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -137,6 +155,7 @@ public partial class MainWindow : Window
             }
 
             PushStatus($"推荐流 +{result.Items.Count} 条 / {result.ElapsedMs}ms");
+            UpdateLoginLabel();
 
             if (_index < 0 && _items.Count > 0)
                 await PlayIndexAsync(0);
@@ -420,6 +439,11 @@ public partial class MainWindow : Window
                     await LoadFeedAsync(reset: true);
                     e.Handled = true;
                     break;
+
+                case Key.L:
+                    OnLoginClick(this, new RoutedEventArgs());
+                    e.Handled = true;
+                    break;
             }
         }
         catch (Exception ex)
@@ -493,6 +517,29 @@ public partial class MainWindow : Window
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
+
+    private async void OnLoginClick(object sender, RoutedEventArgs e)
+    {
+        var win = new LoginWindow { Owner = this };
+        win.ShowDialog();
+
+        if (string.IsNullOrEmpty(win.Cookies))
+        {
+            SetStatus("已取消登录");
+            return;
+        }
+
+        var session = await _client.EnsureSessionAsync();
+        session.LoginCookies = win.Cookies;
+        session.Save();
+
+        UpdateLoginLabel();
+        SetStatus("登录成功，正在刷新推荐…");
+        await LoadFeedAsync(reset: true);
+    }
+
+    private void UpdateLoginLabel()
+        => LoginButton.Content = _client.Session?.IsLoggedIn == true ? "已登录" : "登录";
 
     private void OnWindowStateChanged(object? sender, EventArgs e)
     {

@@ -39,8 +39,21 @@ if not found:
 
 hwnd = found[0]
 user32.ShowWindow(hwnd, 9)
+
+# SetForegroundWindow 对"调用者不是前台进程"的情况会静默失败，
+# 用 AttachThreadInput 借一下前台线程的输入队列，才能真正把焦点抢过来
+fg = user32.GetForegroundWindow()
+fg_thread = user32.GetWindowThreadProcessId(fg, None)
+my_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+user32.AttachThreadInput(my_thread, fg_thread, True)
+user32.AttachThreadInput(my_thread, target_thread, True)
+user32.BringWindowToTop(hwnd)
 user32.SetForegroundWindow(hwnd)
-time.sleep(0.4)
+user32.SetFocus(hwnd)
+user32.AttachThreadInput(my_thread, target_thread, False)
+user32.AttachThreadInput(my_thread, fg_thread, False)
+time.sleep(0.5)
 
 for vk in keys:
     user32.keybd_event(vk, 0, 0, 0)

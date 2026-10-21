@@ -24,6 +24,7 @@ public partial class App : Application
 
     private static void ShowFatal(Exception ex)
     {
+        AppLog.Write("未处理异常：" + ex);
         MessageBox.Show(ex.ToString(), "出错了", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 }

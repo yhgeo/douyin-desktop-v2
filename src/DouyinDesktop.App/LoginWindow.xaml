@@ -1,0 +1,50 @@
+﻿<Window x:Class="DouyinDesktop.App.LoginWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="登录抖音" Width="520" Height="820"
+        WindowStyle="None" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource PanelBrush}"
+        ShowInTaskbar="False">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 标题栏（可拖动） -->
+        <Grid Grid.Row="0" Height="40" Background="{StaticResource BgBrush}"
+              MouseLeftButtonDown="OnTitleDrag">
+            <TextBlock Text="登录抖音" Margin="16,0,0,0" VerticalAlignment="Center"
+                       FontSize="12" Foreground="{StaticResource SubTextBrush}" />
+            <Button Content="✕" Style="{StaticResource CloseButton}"
+                    HorizontalAlignment="Right" Click="OnCloseClick" />
+            <Border Height="1" VerticalAlignment="Bottom" Background="{StaticResource LineBrush}" />
+        </Grid>
+
+        <!-- 登录页。抖音的登录是页面内弹窗，所以直接开首页让用户点右上角"登录" -->
+        <wv2:WebView2 x:Name="Web" Grid.Row="1" />
+
+        <!-- 加载态 / 提示 -->
+        <Grid Grid.Row="1" x:Name="Overlay" Background="{StaticResource PanelBrush}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock x:Name="OverlayText" Text="正在打开登录页…"
+                           HorizontalAlignment="Center" FontSize="13"
+                           Foreground="{StaticResource SubTextBrush}" />
+                <TextBlock x:Name="OverlayHint" Text=""
+                           HorizontalAlignment="Center" FontSize="12" Margin="0,10,0,0"
+                           Foreground="#5A5A66" TextWrapping="Wrap" MaxWidth="360"
+                           TextAlignment="Center" />
+            </StackPanel>
+        </Grid>
+
+        <Border Grid.Row="2" Background="{StaticResource BgBrush}" Padding="16,10">
+            <TextBlock Text="扫码或手机号登录，成功后会自己关掉这个窗口"
+                       FontSize="12" Foreground="{StaticResource SubTextBrush}"
+                       TextAlignment="Center" />
+        </Border>
+    </Grid>
+</Window>
