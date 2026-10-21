@@ -1,4 +1,4 @@
-﻿using DouyinDesktop.Core.Api;
+using DouyinDesktop.Core.Api;
 
 // 数据层验证探针：只依赖 Core，不写任何硬编码凭据。
 // 跑法（项目根目录）：dotnet run --project src/DouyinDesktop.Probe
@@ -197,6 +197,31 @@ if (args.Length > 0 && args[0] == "replies")
     Console.WriteLine($"拿到 {replies.Comments.Count} 条回复 / hasMore={replies.HasMore}\n");
     foreach (var r in replies.Comments.Take(6))
         Console.WriteLine($"  {r.Nickname}: {r.Text}   [{r.MetaText}]");
+    return 0;
+}
+
+// 滚动加载版推荐流：dotnet run --project src/DouyinDesktop.Probe -- scroll
+if (args.Length > 0 && args[0] == "scroll")
+{
+    using var cs = DouyinClient.Create();
+    cs.Log += m => Console.WriteLine("    " + m);
+
+    int total = 0, imageCount = 0;
+    for (int i = 0; i < 4; i++)
+    {
+        var r = await cs.GetFeedScrollAsync(10, i + 2);
+        if (!r.Success) { Console.WriteLine("失败：" + r.Message); break; }
+
+        total += r.Items.Count;
+        imageCount += r.Items.Count(x => x.IsImagePost);
+        string types = string.Join(",", r.Items.GroupBy(x => x.AwemeType)
+            .Select(g => $"{g.Key}×{g.Count()}"));
+        Console.WriteLine($"  第 {i + 1} 批 {r.Items.Count} 条  aweme_type: {types}");
+
+        foreach (var img in r.Items.Where(x => x.IsImagePost))
+            Console.WriteLine($"    图集 {img.Id}  {img.Images!.Count} 张  {img.Desc[..Math.Min(24, img.Desc.Length)]}");
+    }
+    Console.WriteLine($"\n共 {total} 条，图集 {imageCount}");
     return 0;
 }
 

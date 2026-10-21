@@ -17,6 +17,8 @@ public partial class MainWindow : Window
     private readonly KeyMap _keyMap = KeyMap.Load();
     private readonly List<Aweme> _items = new();
     private readonly HashSet<string> _presented = new();
+    private bool _useScrollFeed;
+    private int _refreshIndex = 2;
 
     // 图集：图片走单独的 HttpClient，缓存最近看过的几十张
     private readonly HttpClient _imageHttp = CreateImageHttp();
@@ -234,7 +236,12 @@ public partial class MainWindow : Window
             }
 
             SetStatus("正在获取推荐…");
-            var result = await _client.GetFeedAsync(15, _presented);
+            // 两个推荐接口交替用：module/feed 和 tab/feed 的内容池不同，
+            // 混着拉能增加内容多样性（图集比例也会略有提升）
+            var result = _useScrollFeed
+                ? await _client.GetFeedScrollAsync(10, _refreshIndex++)
+                : await _client.GetFeedAsync(15, _presented);
+            _useScrollFeed = !_useScrollFeed;
             if (!result.Success)
             {
                 SetStatus("获取失败：" + result.Message);

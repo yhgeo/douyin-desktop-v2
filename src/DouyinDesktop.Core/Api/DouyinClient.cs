@@ -330,6 +330,123 @@ public sealed class DouyinClient : IDisposable
         }
     }
 
+    // ================= 推荐流（滚动加载版，实验） =================
+
+    /// <summary>
+    /// 复现浏览器滚动加载用的那条推荐接口（参数和 module/feed 完全不同，
+    /// 没有 module_id，多了 video_type_select / pull_type=2 / min_window 这些）。
+    /// 实测浏览器这条能返回图集。
+    /// </summary>
+    public async Task<FeedResult> GetFeedScrollAsync(
+        int count = 10, int refreshIndex = 2, CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+        string bv = _profile.BrowserVersion;
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("filterGids", ""),
+            new("tag_id", ""),
+            new("share_aweme_id", ""),
+            new("live_insert_type", ""),
+            new("count", count.ToString()),
+            new("refresh_index", refreshIndex.ToString()),
+            new("video_type_select", "1"),
+            new("aweme_pc_rec_raw_data",
+                "{\"is_client\":false,\"ff_danmaku_status\":1,\"danmaku_switch_status\":1," +
+                "\"is_dash_user\":1,\"is_auto_play\":1,\"is_full_screen\":0,\"is_full_webscreen\":0," +
+                "\"is_mute\":1,\"is_speed\":1,\"is_visible\":1,\"related_recommend\":1,\"is_xigua_user\":0}"),
+            new("globalwid", ""),
+            new("pull_type", "2"),
+            new("min_window", "0"),
+            new("free_right", "0"),
+            new("view_count", "2"),
+            new("plug_block", "0"),
+            new("ug_source", ""),
+            new("creative_id", ""),
+            new("pc_client_type", "1"),
+            new("pc_libra_divert", "Windows"),
+            new("support_h265", "0"),
+            new("support_dash", "1"),
+            new("webcast_sdk_version", "170400"),
+            new("webcast_version_code", "170400"),
+            new("version_code", "170400"),
+            new("version_name", "17.4.0"),
+            new("cookie_enabled", "true"),
+            new("screen_width", _profile.ScreenWidth.ToString()),
+            new("screen_height", _profile.ScreenHeight.ToString()),
+            new("browser_language", "zh-CN"),
+            new("browser_platform", "Win32"),
+            new("browser_name", "Chrome"),
+            new("browser_version", bv),
+            new("browser_online", "true"),
+            new("engine_name", "Blink"),
+            new("engine_version", bv),
+            new("os_name", "Windows"),
+            new("os_version", "10"),
+            new("cpu_core_num", _profile.CpuCores.ToString()),
+            new("device_memory", _profile.DeviceMemory.ToString()),
+            new("platform", "PC"),
+            new("downlink", "10"),
+            new("effective_type", "4g"),
+            new("round_trip_time", "50"),
+            new("webid", _profile.WebId),
+            new("msToken", session.MsToken),
+        };
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+
+        // 浏览器的 verifyFp/fp 在 a_bogus 之后
+        query += $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                 $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+
+        string url = $"https://www.douyin.com/aweme/v1/web/tab/feed/?{query}";
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        AddBrowserHeaders(req, session);
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            sw.Stop();
+
+            if (!resp.IsSuccessStatusCode)
+                return FeedResult.Fail($"HTTP {(int)resp.StatusCode}", sw.ElapsedMilliseconds);
+
+            var items = ParseAwemeList(body);
+            if (items.Count == 0) items = ParseFeed(body);
+
+            if (items.Count == 0)
+            {
+                // 结构对不上时把顶层字段打出来，方便定位
+                string shape;
+                try
+                {
+                    using var probe = JsonDocument.Parse(body);
+                    shape = "顶层字段：" + string.Join(",", probe.RootElement.EnumerateObject().Select(x => x.Name));
+                }
+                catch (JsonException) { shape = body.Length > 300 ? body[..300] : body; }
+
+                Log?.Invoke("tab/feed 结构：" + shape);
+                return FeedResult.Fail("scroll 流没有内容（" + shape + "）", sw.ElapsedMilliseconds);
+            }
+
+            Log?.Invoke($"scroll 流 {items.Count} 条 / {sw.ElapsedMilliseconds}ms");
+            return new FeedResult(items, true, "", sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            sw.Stop();
+            return FeedResult.Fail(ex.Message, sw.ElapsedMilliseconds);
+        }
+    }
+
     // ================= 评论 =================
 
     /// <summary>
