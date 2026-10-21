@@ -16,13 +16,29 @@ public partial class MainWindow : Window
     private readonly VideoStreamProxy _proxy = VideoStreamProxy.Start();
     private readonly KeyMap _keyMap = KeyMap.Load();
     private readonly AppSettings _settings = AppSettings.Load();
-    private readonly List<Aweme> _items = new();
-    private readonly HashSet<string> _presented = new();
+    /// <summary>
+    /// 一个信息流的状态：列表、已展示过的 id、当前看到第几条。
+    /// 推荐 / 关注 / 作者主页各存一份，切换时互不影响。
+    /// </summary>
+    private sealed class FeedContext
+    {
+        public List<Aweme> Items { get; } = new();
+        public HashSet<string> Presented { get; } = new();
+        public int Index { get; set; } = -1;
+    }
+
+    private readonly FeedContext _recommendFeed = new();
+    private readonly FeedContext _followFeed = new();
+    private readonly FeedContext _authorFeed = new();
+    private FeedContext _feed = null!;
+
+    // 用属性包一层，原有代码里的 _items / _index / _presented 全部不用改
+    private List<Aweme> _items => _feed.Items;
+    private int _index { get => _feed.Index; set => _feed.Index = value; }
+    private HashSet<string> _presented => _feed.Presented;
     private bool _useScrollFeed;
     /// <summary>当前是不是「关注」页（只刷关注的人）。</summary>
     private bool _followMode;
-    private CancellationTokenSource? _ipCts;
-    private readonly Dictionary<string, string> _ipCache = new();
     private int _refreshIndex = 2;
 
     // 图集：图片走单独的 HttpClient，缓存最近看过的几十张
@@ -33,7 +49,6 @@ public partial class MainWindow : Window
     private int _imageIndex;
 
     private MpvController? _mpv;
-    private int _index = -1;
     private bool _mpvStarting;
     private bool _feedLoading;
     private bool _fullscreen;
@@ -59,6 +74,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _feed = _recommendFeed;
         CommentList.ItemsSource = _commentVms;
         _client.Log += msg => Dispatcher.BeginInvoke(() => PushStatus(msg));
         Surface.HandleCreated += OnSurfaceReady;
@@ -375,41 +391,25 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 补 IP 属地。
-    ///
-    /// 列表接口（module/feed、tab/feed）的 region 字段是空的，
-    /// 只有 aweme/detail 才有——而且那个接口要 webSign 签名、还要登录态。
-    /// 所以这里做两件事：停留 900ms 才发请求（快速划过不浪费），结果缓存。
+    /// 切换信息流。目标流如果之前看过，直接恢复上次的位置和列表，
+    /// 不重新拉数据——切来切去不该把推荐流刷没。
     /// </summary>
-    private async Task LoadIpAsync(Aweme item)
+    private async Task SwitchFeedAsync(FeedContext target, string label)
     {
-        if (!string.IsNullOrEmpty(item.IpLabel)) return;
+        _feed = target;
 
-        if (_ipCache.TryGetValue(item.Id, out string? cached))
+        if (target.Items.Count > 0)
         {
-            if (!string.IsNullOrEmpty(cached)) UpdateMetaLine(item, cached);
-            return;
+            int idx = Math.Clamp(target.Index, 0, target.Items.Count - 1);
+            await PlayIndexAsync(idx, force: true);
+            UpdateIndexLabel();
+            SetStatus($"{label}：{target.Items.Count} 条（已恢复上次的位置）");
         }
-
-        _ipCts?.Cancel();
-        var cts = new CancellationTokenSource();
-        _ipCts = cts;
-
-        try
+        else
         {
-            await Task.Delay(900, cts.Token);
-
-            var detail = await _client.GetAwemeDetailAsync(item.Id, cts.Token);
-            if (detail is null || cts.IsCancellationRequested) return;
-
-            if (_ipCache.Count > 200) _ipCache.Clear();
-            _ipCache[item.Id] = detail.IpLabel;
-
-            if (!string.IsNullOrEmpty(detail.IpLabel) && CurrentId == item.Id)
-                UpdateMetaLine(item, detail.IpLabel);
+            SetStatus($"正在加载{label}…");
+            await LoadFeedAsync(reset: false);
         }
-        catch (OperationCanceledException) { /* 切走了 */ }
-        catch (Exception ex) { PushStatus("取 IP 失败：" + ex.Message); }
     }
 
     /// <summary>
@@ -446,9 +446,12 @@ public partial class MainWindow : Window
         }
 
         _authorMode = true;
-        _items.Clear();
-        _items.AddRange(result.Items);
-        _index = -1;
+        _followMode = false;
+        _feed = _authorFeed;
+        _authorFeed.Items.Clear();
+        _authorFeed.Presented.Clear();
+        _authorFeed.Index = -1;
+        _authorFeed.Items.AddRange(result.Items);
 
         int imageCount = result.Items.Count(x => x.IsImagePost);
         AppLog.Write($"作者作品：{result.Items.Count} 条，其中图集 {imageCount} 条");
@@ -522,7 +525,6 @@ public partial class MainWindow : Window
             SetStatus("加载失败：" + ex.Message);
         }
 
-        _ = LoadIpAsync(item);
         _lastFromCache = _proxy.HasPrefetch(item.Id);
         PrefetchAround(index);
         UpdateIndexLabel();
@@ -1090,8 +1092,9 @@ public partial class MainWindow : Window
                 case "follow":
                     _followMode = !_followMode;
                     _authorMode = false;
-                    SetStatus(_followMode ? "切换到关注页…" : "切换回推荐…");
-                    await LoadFeedAsync(reset: true);
+                    await SwitchFeedAsync(
+                        _followMode ? _followFeed : _recommendFeed,
+                        _followMode ? "关注" : "推荐");
                     break;
 
                 case "tab":

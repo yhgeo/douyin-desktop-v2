@@ -723,15 +723,40 @@ public sealed class DouyinClient : IDisposable
         try
         {
             using var doc = JsonDocument.Parse(json);
-            if (!doc.RootElement.TryGetProperty("aweme_list", out var arr)
-                || arr.ValueKind != JsonValueKind.Array)
-                return list;
+            var root = doc.RootElement;
 
-            foreach (var a in arr.EnumerateArray())
+            // 作者主页 / tab 流：{aweme_list:[...]}
+            if (root.TryGetProperty("aweme_list", out var arr) && arr.ValueKind == JsonValueKind.Array)
             {
-                if (a.ValueKind != JsonValueKind.Object) continue;
+                foreach (var a in arr.EnumerateArray())
+                {
+                    if (a.ValueKind != JsonValueKind.Object) continue;
+                    var item = a.Deserialize<Aweme>(JsonOptions);
+                    if (item is not null && !string.IsNullOrEmpty(item.Id)) list.Add(item);
+                }
+            }
+            // 关注流：{cursor, data:[...], has_more} —— 结构和 aweme_list 完全不同
+            else if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var a in data.EnumerateArray())
+                {
+                    if (a.ValueKind != JsonValueKind.Object) continue;
 
-                var item = a.Deserialize<Aweme>(JsonOptions);
+                    // data 里可能是 {aweme:{...}}，也可能直接是作品对象
+                    var node = a.TryGetProperty("aweme", out var inner)
+                               && inner.ValueKind == JsonValueKind.Object
+                        ? inner
+                        : a;
+
+                    var item = node.Deserialize<Aweme>(JsonOptions);
+                    if (item is not null && !string.IsNullOrEmpty(item.Id)) list.Add(item);
+                }
+            }
+            // 作品详情：{aweme_detail:{...}}
+            else if (root.TryGetProperty("aweme_detail", out var detail)
+                     && detail.ValueKind == JsonValueKind.Object)
+            {
+                var item = detail.Deserialize<Aweme>(JsonOptions);
                 if (item is not null && !string.IsNullOrEmpty(item.Id)) list.Add(item);
             }
         }
@@ -794,8 +819,6 @@ public sealed class DouyinClient : IDisposable
             }
 
             var item = d.Deserialize<Aweme>(JsonOptions);
-            if (item is not null)
-                Log?.Invoke($"详情 {awemeId} ip='{item.IpLabel}' region='{(d.TryGetProperty("region", out var rg) ? rg.ToString() : "")}'");
             return item;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
