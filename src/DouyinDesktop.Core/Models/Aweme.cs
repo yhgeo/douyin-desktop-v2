@@ -120,4 +120,8 @@ public sealed class MusicInfo
 {
     [JsonPropertyName("title")] public string Title { get; init; } = "";
     [JsonPropertyName("author")] public string Author { get; init; } = "";
+    [JsonPropertyName("play_url")] public UrlList? PlayUrl { get; init; }
+
+    /// <summary>音频直链。图集没有视频流，但可以播这个当背景音乐。</summary>
+    [JsonIgnore] public string AudioUrl => PlayUrl?.First ?? "";
 }

@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private readonly DouyinClient _client = DouyinClient.Create();
     private readonly VideoStreamProxy _proxy = VideoStreamProxy.Start();
     private readonly KeyMap _keyMap = KeyMap.Load();
+    private readonly AppSettings _settings = AppSettings.Load();
     private readonly List<Aweme> _items = new();
     private readonly HashSet<string> _presented = new();
     private bool _useScrollFeed;
@@ -236,24 +237,43 @@ public partial class MainWindow : Window
             }
 
             SetStatus("正在获取推荐…");
-            // 两个推荐接口交替用：module/feed 和 tab/feed 的内容池不同，
-            // 混着拉能增加内容多样性（图集比例也会略有提升）
-            var result = _useScrollFeed
-                ? await _client.GetFeedScrollAsync(10, _refreshIndex++)
-                : await _client.GetFeedAsync(15, _presented);
-            _useScrollFeed = !_useScrollFeed;
-            if (!result.Success)
+            IReadOnlyList<Aweme> got;
+            long elapsed = 0;
+
+            if (_settings.ImageOnly)
             {
-                SetStatus("获取失败：" + result.Message);
-                return;
+                got = await FetchImagesOnlyAsync();
+                if (got.Count == 0)
+                {
+                    SetStatus("拉了几次都没找到图集，稍后再试（图集只占约 5%）");
+                    return;
+                }
+            }
+            else
+            {
+                // 两个推荐接口交替用：module/feed 和 tab/feed 的内容池不同，
+                // 混着拉能增加内容多样性（图集比例也会略有提升）
+                var result = _useScrollFeed
+                    ? await _client.GetFeedScrollAsync(10, _refreshIndex++)
+                    : await _client.GetFeedAsync(15, _presented);
+                _useScrollFeed = !_useScrollFeed;
+
+                if (!result.Success)
+                {
+                    SetStatus("获取失败：" + result.Message);
+                    return;
+                }
+
+                got = result.Items;
+                elapsed = result.ElapsedMs;
             }
 
-            foreach (var a in result.Items)
+            foreach (var a in got)
             {
                 if (_presented.Add(a.Id)) _items.Add(a);
             }
 
-            PushStatus($"推荐流 +{result.Items.Count} 条 / {result.ElapsedMs}ms");
+            PushStatus($"推荐流 +{got.Count} 条 / {elapsed}ms");
 
             if (_index < 0 && _items.Count > 0)
                 await PlayIndexAsync(0);
@@ -268,6 +288,43 @@ public partial class MainWindow : Window
         {
             _feedLoading = false;
         }
+    }
+
+    /// <summary>
+    /// 只看图集：循环拉推荐流，把视频丢掉，只留图集。
+    ///
+    /// 代价要说清楚：图集在推荐流里约占 5%，凑 8 条要拉 160 条数据（约 8 次请求）。
+    /// 所以这里硬性限制最多 6 次，拉不到就返回空，不会无限请求。
+    /// </summary>
+    private async Task<IReadOnlyList<Aweme>> FetchImagesOnlyAsync()
+    {
+        var images = new List<Aweme>();
+        var seen = new HashSet<string>();
+
+        for (int i = 0; i < 6 && images.Count < 8; i++)
+        {
+            SetStatus($"只看图集：第 {i + 1} 次筛选，已找到 {images.Count} 条…");
+
+            var r = _useScrollFeed
+                ? await _client.GetFeedScrollAsync(10, _refreshIndex++)
+                : await _client.GetFeedAsync(20, _presented);
+            _useScrollFeed = !_useScrollFeed;
+
+            if (!r.Success) break;
+
+            foreach (var a in r.Items)
+            {
+                if (!a.IsImagePost) continue;
+                if (_presented.Contains(a.Id) || !seen.Add(a.Id)) continue;
+                images.Add(a);
+            }
+
+            if (images.Count >= 8) break;
+            await Task.Delay(350);
+        }
+
+        PushStatus($"只看图集：找到 {images.Count} 条");
+        return images;
     }
 
     /// <summary>
@@ -546,7 +603,17 @@ public partial class MainWindow : Window
 
         if (_mpv is not null)
         {
-            try { await _mpv.StopAsync(); } catch { /* 已经停了 */ }
+            string audio = item.Music?.AudioUrl ?? "";
+            if (audio.Length > 0)
+            {
+                // 图集没有视频流，但背景音乐照放
+                try { await _mpv.LoadAudioAsync(audio); }
+                catch (Exception ex) { PushStatus("音乐播放失败：" + ex.Message); }
+            }
+            else
+            {
+                try { await _mpv.StopAsync(); } catch { /* 已经停了 */ }
+            }
         }
 
         await LoadImageAsync();
@@ -705,6 +772,13 @@ public partial class MainWindow : Window
 
     private void OnFileFailed(string reason)
     {
+        // 图集放的是背景音乐，音乐挂了不该把整个作品跳过
+        if (_imageMode)
+        {
+            Dispatcher.BeginInvoke(() => SetStatus("背景音乐加载失败"));
+            return;
+        }
+
         Dispatcher.BeginInvoke(async () =>
         {
             _consecutiveFailures++;
@@ -1008,7 +1082,7 @@ public partial class MainWindow : Window
 
     private void OnSettingsClick(object sender, RoutedEventArgs e)
     {
-        var win = new SettingsWindow(_keyMap, _client, HandleLoginAsync, HandleLogout)
+        var win = new SettingsWindow(_keyMap, _settings, _client, HandleLoginAsync, HandleLogout)
         {
             Owner = this,
         };

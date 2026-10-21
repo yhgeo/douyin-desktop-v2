@@ -17,9 +17,11 @@ public partial class SettingsWindow : Window
     private readonly DouyinDesktop.Core.Api.DouyinClient _client;
     private readonly Func<Task<bool>> _loginAction;
     private readonly Action _logoutAction;
+    private readonly AppSettings _settings;
     private KeyRow? _capturing;
 
     public SettingsWindow(KeyMap map,
+                          AppSettings settings,
                           DouyinDesktop.Core.Api.DouyinClient client,
                           Func<Task<bool>> loginAction,
                           Action logoutAction)
@@ -27,6 +29,7 @@ public partial class SettingsWindow : Window
         InitializeComponent();
 
         _map = map;
+        _settings = settings;
         _client = client;
         _loginAction = loginAction;
         _logoutAction = logoutAction;
@@ -35,6 +38,7 @@ public partial class SettingsWindow : Window
         KeyList.ItemsSource = _rows;
 
         DataPathText.Text = DouyinDesktop.Core.DouyinPaths.DataDirectory;
+        ImageOnlyCheck.IsChecked = settings.ImageOnly;
         RefreshAccount();
     }
 
@@ -42,16 +46,25 @@ public partial class SettingsWindow : Window
 
     private void OnNavAccount(object sender, RoutedEventArgs e) => SwitchPage("account");
     private void OnNavKeys(object sender, RoutedEventArgs e) => SwitchPage("keys");
+    private void OnNavPlay(object sender, RoutedEventArgs e) => SwitchPage("play");
     private void OnNavAbout(object sender, RoutedEventArgs e) => SwitchPage("about");
+
+    private void OnImageOnlyChanged(object sender, RoutedEventArgs e)
+    {
+        _settings.ImageOnly = ImageOnlyCheck.IsChecked == true;
+        _settings.Save();
+    }
 
     private void SwitchPage(string page)
     {
         NavAccount.Tag = page == "account" ? "active" : null;
         NavKeys.Tag = page == "keys" ? "active" : null;
+        NavPlay.Tag = page == "play" ? "active" : null;
         NavAbout.Tag = page == "about" ? "active" : null;
 
         PageAccount.Visibility = page == "account" ? Visibility.Visible : Visibility.Collapsed;
         PageKeys.Visibility = page == "keys" ? Visibility.Visible : Visibility.Collapsed;
+        PagePlay.Visibility = page == "play" ? Visibility.Visible : Visibility.Collapsed;
         PageAbout.Visibility = page == "about" ? Visibility.Visible : Visibility.Collapsed;
     }
 

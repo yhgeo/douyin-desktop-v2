@@ -219,8 +219,23 @@ public sealed class MpvController : IAsyncDisposable
         _vFps = 0;
         _vBitrate = 0;
         _vCodec = _aCodec = _hwdec = "";
+
+        // 图集播过音乐的话 vid 是 no，这里要恢复
+        await _ipc.CommandAsync("set", "vid", "auto");
         await _ipc.CommandAsync("loadfile", url, "replace");
         if (autoPlay) await _ipc.CommandAsync("set", "pause", "no");
+    }
+
+    /// <summary>
+    /// 只播音频（图集的背景音乐）。图集没有视频流，但音乐可以照常放。
+    /// </summary>
+    public async Task LoadAudioAsync(string url)
+    {
+        Log?.Invoke("loadfile (audio) " + url);
+        _endHandled = false;
+        await _ipc.CommandAsync("set", "vid", "no");
+        await _ipc.CommandAsync("loadfile", url, "replace");
+        await _ipc.CommandAsync("set", "pause", "no");
     }
 
     // 注意：mpv 的 set 命令只认字符串值。传 JSON 的 true/false/80 会返回

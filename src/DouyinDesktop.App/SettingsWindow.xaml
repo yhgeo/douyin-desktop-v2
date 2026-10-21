@@ -1,4 +1,4 @@
-﻿<Window x:Class="DouyinDesktop.App.SettingsWindow"
+<Window x:Class="DouyinDesktop.App.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="设置" Width="780" Height="600"
@@ -40,6 +40,8 @@
                             Style="{StaticResource NavButton}" Click="OnNavAccount" />
                     <Button x:Name="NavKeys" Content="快捷键"
                             Style="{StaticResource NavButton}" Click="OnNavKeys" />
+                    <Button x:Name="NavPlay" Content="播放"
+                            Style="{StaticResource NavButton}" Click="OnNavPlay" />
                     <Button x:Name="NavAbout" Content="关于"
                             Style="{StaticResource NavButton}" Click="OnNavAbout" />
                 </StackPanel>
@@ -131,6 +133,24 @@
                                    Foreground="#7A8AA8" />
                     </DockPanel>
                 </Border>
+            </Grid>
+
+            <!-- 播放页 -->
+            <Grid x:Name="PagePlay" Grid.Column="1" Visibility="Collapsed">
+                <StackPanel Margin="28,26,28,24">
+                    <TextBlock Text="播放" FontSize="15" FontWeight="SemiBold" />
+
+                    <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,14,0,0">
+                        <StackPanel>
+                            <CheckBox x:Name="ImageOnlyCheck" Content="只看图集（跳过视频）"
+                                      Foreground="{StaticResource TextBrush}" FontSize="13"
+                                      Checked="OnImageOnlyChanged" Unchecked="OnImageOnlyChanged" />
+                            <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,9,0,0"
+                                       TextWrapping="Wrap" LineHeight="18"
+                                       Text="图集在推荐流里约占 5%，开启后会连续拉几次直到凑够（最多 6 次请求）。请求比较频繁，不建议反复按 R 刷新。" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
             </Grid>
 
             <!-- 关于页 -->

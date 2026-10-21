@@ -120,7 +120,10 @@ public sealed class DouyinClient : IDisposable
     {
         var session = await EnsureSessionAsync(ct: ct);
 
-        string presented = presentedIds is null ? "" : string.Join(",", presentedIds);
+        // 只带最近 50 个：全带上会让 URL 越来越长，几千字符容易被服务端拒
+        string presented = presentedIds is null
+            ? ""
+            : string.Join(",", presentedIds.TakeLast(50));
         var result = await FetchFeedOnceAsync(session, count, presented, ct);
         if (result.Success) return result;
 
