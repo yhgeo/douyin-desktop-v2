@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>DouyinDesktop</AssemblyName>
+    <RootNamespace>DouyinDesktop.App</RootNamespace>
+    <ApplicationIcon />
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DouyinDesktop.Core\DouyinDesktop.Core.csproj" />
+    <ProjectReference Include="..\DouyinDesktop.Player\DouyinDesktop.Player.csproj" />
+  </ItemGroup>
+
+</Project>
