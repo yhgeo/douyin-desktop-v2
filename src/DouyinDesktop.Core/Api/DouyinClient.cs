@@ -341,7 +341,8 @@ public sealed class DouyinClient : IDisposable
     /// 实测浏览器这条能返回图集。
     /// </summary>
     public async Task<FeedResult> GetFeedScrollAsync(
-        int count = 10, int refreshIndex = 2, CancellationToken ct = default)
+        int count = 10, int refreshIndex = 2, string endpoint = "tab/feed",
+        CancellationToken ct = default)
     {
         var session = await EnsureSessionAsync(ct: ct);
         string bv = _profile.BrowserVersion;
@@ -407,7 +408,7 @@ public sealed class DouyinClient : IDisposable
         query += $"&a_bogus={UrlCodec.Quote(abogus)}" +
                  $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
 
-        string url = $"https://www.douyin.com/aweme/v1/web/tab/feed/?{query}";
+        string url = $"https://www.douyin.com/aweme/v1/web/{endpoint}/?{query}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
@@ -729,12 +730,79 @@ public sealed class DouyinClient : IDisposable
             foreach (var a in arr.EnumerateArray())
             {
                 if (a.ValueKind != JsonValueKind.Object) continue;
+
                 var item = a.Deserialize<Aweme>(JsonOptions);
                 if (item is not null && !string.IsNullOrEmpty(item.Id)) list.Add(item);
             }
         }
         catch (JsonException) { }
         return list;
+    }
+
+    /// <summary>
+    /// 作品详情。**IP 属地只有这个接口给**——列表接口（module/feed、tab/feed）
+    /// 的 region 字段都是空的。
+    /// 成本：每个作品一次请求，所以调用方要自己做防抖和缓存。
+    /// </summary>
+    public async Task<Aweme?> GetAwemeDetailAsync(string awemeId, CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+        string bv = _profile.BrowserVersion;
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("aweme_id", awemeId),
+        };
+        ps.AddRange(_profile.PlatformParams());
+        ps.Add(new("webid", _profile.WebId));
+
+        string uifid = session.EffectiveUifid;
+        if (!string.IsNullOrEmpty(uifid)) ps.Add(new("uifid", uifid));
+        ps.Add(new("msToken", session.MsToken));
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+        query += $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                 $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+
+        // 详情接口在 secsdk 的 webSign 策略表里
+        string url = WebSign.SignUrl(
+            "https://www.douyin.com/aweme/v1/web/aweme/detail/", query, uifid);
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        AddBrowserHeaders(req, session);
+
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                Log?.Invoke($"详情 HTTP {(int)resp.StatusCode}");
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("aweme_detail", out var d)
+                || d.ValueKind != JsonValueKind.Object)
+            {
+                Log?.Invoke("详情里没有 aweme_detail");
+                return null;
+            }
+
+            var item = d.Deserialize<Aweme>(JsonOptions);
+            if (item is not null)
+                Log?.Invoke($"详情 {awemeId} ip='{item.IpLabel}' region='{(d.TryGetProperty("region", out var rg) ? rg.ToString() : "")}'");
+            return item;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            Log?.Invoke("详情请求失败：" + ex.Message);
+            return null;
+        }
     }
 
     // ================= 播放 =================

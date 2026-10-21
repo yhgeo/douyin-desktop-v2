@@ -25,6 +25,7 @@ public sealed class KeyMap
         new("login",      "登录",         Key.L,      Array.Empty<Key>()),
         new("tab",        "详情 / 评论",  Key.Tab,    Array.Empty<Key>()),
         new("author",     "看作者主页",   Key.U,      Array.Empty<Key>()),
+        new("follow",     "关注页 / 推荐页", Key.G,   Array.Empty<Key>()),
     };
 
     private readonly Dictionary<string, Key> _keys = new();

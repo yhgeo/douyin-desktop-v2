@@ -19,6 +19,10 @@ public partial class MainWindow : Window
     private readonly List<Aweme> _items = new();
     private readonly HashSet<string> _presented = new();
     private bool _useScrollFeed;
+    /// <summary>当前是不是「关注」页（只刷关注的人）。</summary>
+    private bool _followMode;
+    private CancellationTokenSource? _ipCts;
+    private readonly Dictionary<string, string> _ipCache = new();
     private int _refreshIndex = 2;
 
     // 图集：图片走单独的 HttpClient，缓存最近看过的几十张
@@ -245,7 +249,28 @@ public partial class MainWindow : Window
             IReadOnlyList<Aweme> got;
             long elapsed = 0;
 
-            if (_settings.ImageOnly)
+            if (_followMode)
+            {
+                // 关注流走 follow/feed，结构是 {cursor, data:[...]}，
+                // 而且**必须登录**（游客态 data 是空的）
+                if (_client.Session?.IsLoggedIn != true)
+                {
+                    _followMode = false;
+                    SetStatus("关注页需要先登录：设置 → 账号 → 扫码登录");
+                    return;
+                }
+
+                var r = await _client.GetFeedScrollAsync(10, _refreshIndex++, "follow/feed");
+                if (!r.Success)
+                {
+                    SetStatus("关注流加载失败：" + r.Message);
+                    return;
+                }
+
+                got = r.Items;
+                elapsed = r.ElapsedMs;
+            }
+            else if (_settings.ImageOnly)
             {
                 got = await FetchImagesOnlyAsync();
                 if (got.Count == 0)
@@ -337,6 +362,54 @@ public partial class MainWindow : Window
 
         PushStatus($"只看图集：找到 {images.Count} 条");
         return images;
+    }
+
+    private void UpdateMetaLine(Aweme item, string ip)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrEmpty(ip)) parts.Add(ip);
+        if (item.CreateTime > 0) parts.Add(item.CreatedLocal.ToString("yyyy-MM-dd HH:mm"));
+
+        MetaLine.Text = string.Join(" · ", parts);
+        MetaLine.Visibility = parts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// 补 IP 属地。
+    ///
+    /// 列表接口（module/feed、tab/feed）的 region 字段是空的，
+    /// 只有 aweme/detail 才有——而且那个接口要 webSign 签名、还要登录态。
+    /// 所以这里做两件事：停留 900ms 才发请求（快速划过不浪费），结果缓存。
+    /// </summary>
+    private async Task LoadIpAsync(Aweme item)
+    {
+        if (!string.IsNullOrEmpty(item.IpLabel)) return;
+
+        if (_ipCache.TryGetValue(item.Id, out string? cached))
+        {
+            if (!string.IsNullOrEmpty(cached)) UpdateMetaLine(item, cached);
+            return;
+        }
+
+        _ipCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _ipCts = cts;
+
+        try
+        {
+            await Task.Delay(900, cts.Token);
+
+            var detail = await _client.GetAwemeDetailAsync(item.Id, cts.Token);
+            if (detail is null || cts.IsCancellationRequested) return;
+
+            if (_ipCache.Count > 200) _ipCache.Clear();
+            _ipCache[item.Id] = detail.IpLabel;
+
+            if (!string.IsNullOrEmpty(detail.IpLabel) && CurrentId == item.Id)
+                UpdateMetaLine(item, detail.IpLabel);
+        }
+        catch (OperationCanceledException) { /* 切走了 */ }
+        catch (Exception ex) { PushStatus("取 IP 失败：" + ex.Message); }
     }
 
     /// <summary>
@@ -449,6 +522,7 @@ public partial class MainWindow : Window
             SetStatus("加载失败：" + ex.Message);
         }
 
+        _ = LoadIpAsync(item);
         _lastFromCache = _proxy.HasPrefetch(item.Id);
         PrefetchAround(index);
         UpdateIndexLabel();
@@ -834,11 +908,7 @@ public partial class MainWindow : Window
     {
         AuthorText.Text = "@" + item.AuthorName;
 
-        var metaParts = new List<string>();
-        if (!string.IsNullOrEmpty(item.IpLabel)) metaParts.Add(item.IpLabel);
-        if (item.CreateTime > 0) metaParts.Add(item.CreatedLocal.ToString("yyyy-MM-dd HH:mm"));
-        MetaLine.Text = string.Join(" · ", metaParts);
-        MetaLine.Visibility = metaParts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateMetaLine(item, item.IpLabel);
         DescText.Text = string.IsNullOrWhiteSpace(item.Desc) ? "（无文案）" : item.Desc;
 
         var st = item.Statistics;
@@ -1015,6 +1085,13 @@ public partial class MainWindow : Window
 
                 case "author":
                     await LoadCurrentAuthorAsync();
+                    break;
+
+                case "follow":
+                    _followMode = !_followMode;
+                    _authorMode = false;
+                    SetStatus(_followMode ? "切换到关注页…" : "切换回推荐…");
+                    await LoadFeedAsync(reset: true);
                     break;
 
                 case "tab":

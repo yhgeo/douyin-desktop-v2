@@ -228,6 +228,38 @@ if (args.Length > 0 && args[0] == "scroll")
     return 0;
 }
 
+// 详情接口（IP 属地）：dotnet run --project src/DouyinDesktop.Probe -- detail
+if (args.Length > 0 && args[0] == "detail")
+{
+    using var cd = DouyinClient.Create();
+    cd.Log += m => Console.WriteLine("    " + m);
+
+    var f = await cd.GetFeedAsync(3);
+    if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
+
+    foreach (var it in f.Items.Take(2))
+    {
+        var d = await cd.GetAwemeDetailAsync(it.Id);
+        Console.WriteLine($"  {it.Id}  ip='{d?.IpLabel}'  列表里 region 为空  desc='{(d is null ? "(失败)" : d.Desc[..Math.Min(20, d.Desc.Length)])}'");
+    }
+    return 0;
+}
+
+// 关注流：dotnet run --project src/DouyinDesktop.Probe -- follow
+if (args.Length > 0 && args[0] == "follow")
+{
+    using var cf = DouyinClient.Create();
+    cf.Log += m => Console.WriteLine("    " + m);
+
+    foreach (string ep in new[] { "follow/feed", "tab/feed" })
+    {
+        var r = await cf.GetFeedScrollAsync(10, 2, ep);
+        Console.WriteLine($"  {ep}: " + (r.Success ? $"{r.Items.Count} 条" : r.Message));
+        await Task.Delay(800);
+    }
+    return 0;
+}
+
 using var client = DouyinClient.Create();
 client.Log += msg => Console.WriteLine("    " + msg);
 
