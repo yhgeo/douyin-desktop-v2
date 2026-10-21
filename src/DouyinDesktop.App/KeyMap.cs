@@ -10,17 +10,19 @@ namespace DouyinDesktop.App;
 /// </summary>
 public sealed class KeyMap
 {
-    public sealed record ActionDef(string Id, string Label, Key Default, Key[] Aliases);
+    public sealed record ActionDef(string Id, string Label, Key Default, Key[] Aliases,
+        bool Basic = false);
 
     public static readonly ActionDef[] Actions =
     {
-        new("prev",       "上一条",       Key.Up,     new[] { Key.W, Key.PageUp }),
-        new("next",       "下一条",       Key.Down,   new[] { Key.S, Key.PageDown }),
-        new("pause",      "暂停 / 继续",  Key.Space,  Array.Empty<Key>()),
-        new("seekBack",   "快退 5 秒",    Key.Left,   new[] { Key.A }),
-        new("seekForward","快进 5 秒",    Key.Right,  new[] { Key.D }),
-        new("mute",       "静音",         Key.M,      Array.Empty<Key>()),
-        new("fullscreen", "全屏",         Key.F,      Array.Empty<Key>()),
+        // Basic = 太基础了，详情页的快捷键提示里不用列（设置里照样能改）
+        new("prev",       "上一条",       Key.Up,     new[] { Key.W, Key.PageUp }, true),
+        new("next",       "下一条",       Key.Down,   new[] { Key.S, Key.PageDown }, true),
+        new("pause",      "暂停 / 继续",  Key.Space,  Array.Empty<Key>(), true),
+        new("seekBack",   "快退 5 秒",    Key.Left,   new[] { Key.A }, true),
+        new("seekForward","快进 5 秒",    Key.Right,  new[] { Key.D }, true),
+        new("mute",       "静音",         Key.M,      Array.Empty<Key>(), true),
+        new("fullscreen", "全屏",         Key.F,      Array.Empty<Key>(), true),
         new("refresh",    "换一批推荐",   Key.R,      Array.Empty<Key>()),
         new("login",      "登录",         Key.L,      Array.Empty<Key>()),
         new("tab",        "详情 / 评论",  Key.Tab,    Array.Empty<Key>()),

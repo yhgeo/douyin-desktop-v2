@@ -16,6 +16,9 @@ public sealed class AppSettings
     /// </summary>
     public bool ImageOnly { get; set; }
 
+    /// <summary>详情页是否显示快捷键提示（可以手动折叠）。</summary>
+    public bool ShowShortcuts { get; set; } = true;
+
     public static string DefaultPath
         => Path.Combine(DouyinDesktop.Core.DouyinPaths.DataDirectory, "app-settings.json");
 

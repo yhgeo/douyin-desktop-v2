@@ -94,7 +94,7 @@
             </Grid>
 
             <!-- 信息栏 -->
-            <Border x:Name="SidePanel" Grid.Column="1" Width="384"
+            <Border x:Name="SidePanel" Grid.Column="1" Width="344"
                     Background="{StaticResource PanelBrush}"
                     BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
                 <Grid Margin="28,26,28,22">
@@ -130,8 +130,13 @@
                             <TextBlock x:Name="MetaLine" Style="{StaticResource Caption}"
                                        Margin="0,0,0,12" Visibility="Collapsed" />
 
-                            <TextBlock x:Name="DescText" Text="" FontSize="14" LineHeight="23"
-                                       TextWrapping="Wrap" Foreground="#D6D6DE" Margin="0,0,0,18" />
+                            <!-- 文案固定高度：太长就在框里滚，不把下面全挤走 -->
+                            <ScrollViewer x:Name="DescScroll" MaxHeight="132" Margin="0,0,0,16"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <TextBlock x:Name="DescText" Text="" FontSize="14" LineHeight="23"
+                                           TextWrapping="Wrap" Foreground="#D6D6DE" />
+                            </ScrollViewer>
 
                             <StackPanel x:Name="StatsPanel" Orientation="Horizontal" Margin="0,0,0,18">
                                 <TextBlock x:Name="LikeText" Style="{StaticResource Stat}" />
@@ -195,7 +200,12 @@
                             <TextBlock x:Name="TimeText" Style="{StaticResource Caption}"
                                        Text="0:00 / 0:00" Margin="0,0,0,18" />
 
-                            <!-- 快捷键（只显示当前有绑定的，取消掉的自动隐藏） -->
+                            <!-- 快捷键：基础键不列，取消掉的不列，整块也能手动折叠 -->
+                            <TextBlock x:Name="ShortcutToggle" Text="快捷键 ▾"
+                                       FontSize="12" Foreground="#7A8AA8"
+                                       Margin="0,0,0,4" Cursor="Hand"
+                                       MouseLeftButtonUp="OnToggleShortcuts" />
+
                             <ItemsControl x:Name="ShortcutList">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
@@ -295,51 +305,65 @@
                                     </StackPanel>
                                 </StackPanel>
 
-                                <ItemsControl x:Name="ProfileGrid">
-                                    <ItemsControl.ItemsPanel>
+                                <ListBox x:Name="ProfileList" BorderThickness="0"
+                                         Background="Transparent" Padding="0"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         SelectionChanged="OnProfileSelectionChanged">
+                                    <ListBox.ItemsPanel>
                                         <ItemsPanelTemplate>
-                                            <WrapPanel />
+                                            <UniformGrid Columns="3" />
                                         </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <Button Tag="{Binding}" Click="OnProfileItemClick"
-                                                    Cursor="Hand" Margin="0,0,8,8">
-                                                <Button.Template>
-                                                    <ControlTemplate TargetType="Button">
-                                                        <Border x:Name="Bd" Background="Transparent"
-                                                                CornerRadius="6" Padding="2">
+                                    </ListBox.ItemsPanel>
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Margin" Value="0,0,6,6" />
+                                            <Setter Property="Padding" Value="0" />
+                                            <Setter Property="Focusable" Value="False" />
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ListBoxItem">
+                                                        <Border x:Name="Bd" CornerRadius="6"
+                                                                BorderThickness="2"
+                                                                BorderBrush="Transparent">
                                                             <ContentPresenter />
                                                         </Border>
                                                         <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsSelected" Value="True">
+                                                                <Setter TargetName="Bd" Property="BorderBrush"
+                                                                        Value="{StaticResource AccentBrush}" />
+                                                            </Trigger>
                                                             <Trigger Property="IsMouseOver" Value="True">
                                                                 <Setter TargetName="Bd" Property="Background"
-                                                                        Value="#22FFFFFF" />
+                                                                        Value="#1AFFFFFF" />
                                                             </Trigger>
                                                         </ControlTemplate.Triggers>
                                                     </ControlTemplate>
-                                                </Button.Template>
-                                                <StackPanel Width="94">
-                                                    <Grid Height="125">
-                                                        <Border Background="#1A1A22" CornerRadius="5" />
-                                                        <Image Source="{Binding Video.CoverUrl}"
-                                                               Stretch="UniformToFill" />
-                                                        <Border VerticalAlignment="Bottom"
-                                                                HorizontalAlignment="Right"
-                                                                Background="#B0000000" CornerRadius="4"
-                                                                Padding="4,1" Margin="4">
-                                                            <TextBlock Text="{Binding DurationText}"
-                                                                       FontSize="10" Foreground="White" />
-                                                        </Border>
-                                                    </Grid>
-                                                    <TextBlock Text="{Binding LikeShortText}" FontSize="11"
-                                                               Foreground="#7A7A88" Margin="2,5,0,0"
-                                                               TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-                                            </Button>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel>
+                                                <Grid Height="116">
+                                                    <Border Background="#1A1A22" CornerRadius="4" />
+                                                    <Image Source="{Binding Video.CoverUrl}"
+                                                           Stretch="UniformToFill" />
+                                                    <Border VerticalAlignment="Bottom"
+                                                            HorizontalAlignment="Right"
+                                                            Background="#B0000000" CornerRadius="4"
+                                                            Padding="4,1" Margin="4">
+                                                        <TextBlock Text="{Binding DurationText}"
+                                                                   FontSize="10" Foreground="White" />
+                                                    </Border>
+                                                </Grid>
+                                                <TextBlock Text="{Binding LikeShortText}" FontSize="11"
+                                                           Foreground="#7A7A88" Margin="3,4,0,2"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
                                         </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
 
                                 <TextBlock x:Name="ProfileHint" Style="{StaticResource Caption}"
                                            Text="点封面直接播这条" Margin="0,6,0,0" />

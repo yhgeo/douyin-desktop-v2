@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using DouyinDesktop.Core.Api;
@@ -560,6 +561,7 @@ public partial class MainWindow : Window
 
     private readonly Dictionary<string, IReadOnlyList<Aweme>> _profileCache = new();
     private string _profileSecUid = "";
+    private bool _profileSelecting;
 
     private void OnTabDetailClick(object sender, RoutedEventArgs e) => SwitchTab(SideTab.Detail);
     private void OnTabCommentsClick(object sender, RoutedEventArgs e) => SwitchTab(SideTab.Comments);
@@ -647,14 +649,14 @@ public partial class MainWindow : Window
         if (author is null || string.IsNullOrEmpty(author.SecUid))
         {
             ProfileName.Text = "拿不到作者信息";
-            ProfileGrid.ItemsSource = null;
+            ProfileList.ItemsSource = null;
             return;
         }
 
         ProfileName.Text = "@" + author.Nickname;
 
         // 同一个作者不重复拉
-        if (_profileSecUid == author.SecUid && ProfileGrid.ItemsSource is not null) return;
+        if (_profileSecUid == author.SecUid && ProfileList.ItemsSource is not null) return;
 
         if (_profileCache.TryGetValue(author.SecUid, out var cached))
         {
@@ -680,8 +682,11 @@ public partial class MainWindow : Window
     private void ShowProfile(Author author, IReadOnlyList<Aweme> posts)
     {
         _profileSecUid = author.SecUid ?? "";
-        ProfileGrid.ItemsSource = posts;
+        ProfileList.ItemsSource = posts;
         ProfileCount.Text = $"{posts.Count} 条作品 · 点封面直接播";
+
+        // 把当前正在播的那条标出来
+        SyncProfileSelection();
         ProfileHint.Visibility = Visibility.Collapsed;
 
         if (author.AvatarThumb?.First is { Length: > 0 } avatar)
@@ -695,10 +700,21 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnProfileItemClick(object sender, RoutedEventArgs e)
+    /// <summary>当前播放的这条在封面墙上高亮（程序设置选中，不触发播放）。</summary>
+    private void SyncProfileSelection()
     {
-        if (sender is not FrameworkElement { Tag: Aweme item }) return;
-        if (ProfileGrid.ItemsSource is not IReadOnlyList<Aweme> posts) return;
+        if (ProfileList.ItemsSource is not IReadOnlyList<Aweme> posts) return;
+
+        _profileSelecting = true;
+        ProfileList.SelectedItem = posts.FirstOrDefault(x => x.Id == CurrentId);
+        _profileSelecting = false;
+    }
+
+    private async void OnProfileSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_profileSelecting) return;                     // 程序设的选中，不是用户点的
+        if (ProfileList.SelectedItem is not Aweme item) return;
+        if (ProfileList.ItemsSource is not IReadOnlyList<Aweme> posts) return;
 
         int idx = posts.ToList().FindIndex(x => x.Id == item.Id);
         if (idx < 0) return;
@@ -1026,6 +1042,16 @@ public partial class MainWindow : Window
         UpdateMetaLine(item, item.IpLabel);
         DescText.Text = string.IsNullOrWhiteSpace(item.Desc) ? "（无文案）" : item.Desc;
 
+        // 固定高度里放不下就缩字号（14 → 13 → 12），配合滚动条
+        DescText.FontSize = item.Desc.Length switch
+        {
+            > 220 => 12,
+            > 120 => 13,
+            _ => 14,
+        };
+        DescText.LineHeight = DescText.FontSize + 9;
+        DescScroll.ScrollToTop();
+
         var st = item.Statistics;
         LikeText.Text = $"♥ {Count(st?.DiggCount ?? 0)}";
         CommentText.Text = $"💬 {Count(st?.CommentCount ?? 0)}";
@@ -1075,7 +1101,11 @@ public partial class MainWindow : Window
 
         // 正在看评论/主页的话，切作品就跟着换
         if (_sideTab == SideTab.Comments) _ = LoadCommentsAsync(reset: true);
-        if (_sideTab == SideTab.Profile) _ = LoadProfileAsync();
+        if (_sideTab == SideTab.Profile)
+        {
+            _ = LoadProfileAsync();
+            SyncProfileSelection();
+        }
     }
 
     private void UpdateTechStats(VideoStats s)
@@ -1203,7 +1233,8 @@ public partial class MainWindow : Window
                     break;
 
                 case "author":
-                    await LoadCurrentAuthorAsync();
+                    // 和主页 Tab 统一：按 U 直接切过去看封面墙
+                    SwitchTab(SideTab.Profile);
                     break;
 
                 case "follow":
@@ -1356,12 +1387,28 @@ public partial class MainWindow : Window
     private void RefreshShortcuts()
     {
         var rows = KeyMap.Actions
+            .Where(def => !def.Basic)              // 上下左右这些基础键不列
             .Select(def => new { def, key = _keyMap.Get(def.Id) })
-            .Where(x => x.key != Key.None)
+            .Where(x => x.key != Key.None)         // 取消掉的不列
             .Select(x => new { Key = KeyMap.KeyText(x.key), Action = x.def.Label })
             .ToList();
 
         ShortcutList.ItemsSource = rows;
+        ApplyShortcutVisibility();
+    }
+
+    private void OnToggleShortcuts(object sender, RoutedEventArgs e)
+    {
+        _settings.ShowShortcuts = !_settings.ShowShortcuts;
+        _settings.Save();
+        ApplyShortcutVisibility();
+    }
+
+    private void ApplyShortcutVisibility()
+    {
+        ShortcutList.Visibility = _settings.ShowShortcuts
+            ? Visibility.Visible : Visibility.Collapsed;
+        ShortcutToggle.Text = _settings.ShowShortcuts ? "快捷键 ▾" : "快捷键 ▸";
     }
 
     /// <summary>扫码登录。返回是否真的登上了（取消或失败返回 false）。</summary>
