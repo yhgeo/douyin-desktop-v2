@@ -79,6 +79,10 @@ public partial class MainWindow : Window
         CommentList.ItemsSource = _commentVms;
         _client.Log += msg => Dispatcher.BeginInvoke(() => PushStatus(msg));
         Surface.HandleCreated += OnSurfaceReady;
+        Surface.Clicked += async (_, _) =>
+        {
+            if (_mpv is not null) await _mpv.TogglePauseAsync();
+        };
     }
 
     /// <summary>
@@ -669,8 +673,7 @@ public partial class MainWindow : Window
         if (!result.Success)
         {
             ProfileCount.Text = "";
-            ProfileHint.Text = "主页加载失败：" + result.Message;
-            ProfileHint.Visibility = Visibility.Visible;
+            SetStatus("主页加载失败：" + result.Message);
             return;
         }
 
@@ -687,7 +690,6 @@ public partial class MainWindow : Window
 
         // 把当前正在播的那条标出来
         SyncProfileSelection();
-        ProfileHint.Visibility = Visibility.Collapsed;
 
         if (author.AvatarThumb?.First is { Length: > 0 } avatar)
         {
@@ -716,11 +718,10 @@ public partial class MainWindow : Window
         if (ProfileList.SelectedItem is not Aweme item) return;
         if (ProfileList.ItemsSource is not IReadOnlyList<Aweme> posts) return;
 
-        int idx = posts.ToList().FindIndex(x => x.Id == item.Id);
-        if (idx < 0) return;
+        int idx = _items.IndexOf(item);
 
-        // 主页列表和当前流不是一回事：切到「作者主页」流里播
-        if (_items.IndexOf(item) < 0)
+        // 主页列表和当前流不是一回事：先把这批作品灌进「作者主页」流
+        if (idx < 0)
         {
             _authorMode = true;
             _followMode = false;
@@ -728,10 +729,13 @@ public partial class MainWindow : Window
             _authorFeed.Items.Clear();
             _authorFeed.Presented.Clear();
             _authorFeed.Items.AddRange(posts);
-            _authorFeed.Index = idx;
             UpdateModeLabel();
+
+            idx = _authorFeed.Items.IndexOf(item);
+            if (idx < 0) return;
         }
 
+        AppLog.Write($"主页点封面：{item.Id} -> 第 {idx + 1} 条");
         await PlayIndexAsync(idx, force: true);
     }
 

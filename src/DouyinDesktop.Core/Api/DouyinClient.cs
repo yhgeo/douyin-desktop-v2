@@ -765,8 +765,11 @@ public sealed class DouyinClient : IDisposable
     }
 
     /// <summary>
-    /// 作品详情。**IP 属地只有这个接口给**——列表接口（module/feed、tab/feed）
-    /// 的 region 字段都是空的。
+    /// 作品详情。需要 webSign 签名，返回单条作品的完整结构。
+    ///
+    /// 注意：**PC 端接口没有 IP 属地**。曾经以为详情接口会给，实测（把 109KB
+    /// 完整响应存盘后 grep）列表和详情里都没有 ip_label，region 恒为空，
+    /// 登录态下也一样。评论区倒是有 ip_label。
     /// 成本：每个作品一次请求，所以调用方要自己做防抖和缓存。
     /// </summary>
     public async Task<Aweme?> GetAwemeDetailAsync(string awemeId, CancellationToken ct = default)

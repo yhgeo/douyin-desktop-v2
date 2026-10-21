@@ -291,84 +291,83 @@
 
                     <!-- 主页：作者的视频封面墙（只加载封面图，不加载视频） -->
                     <Grid x:Name="ProfilePane" Grid.Row="1" Visibility="Collapsed">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                      HorizontalScrollBarVisibility="Disabled">
-                            <StackPanel>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                    <Image x:Name="ProfileAvatar" Width="46" Height="46"
-                                           Stretch="UniformToFill" />
-                                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                                        <TextBlock x:Name="ProfileName" FontSize="15"
-                                                   FontWeight="SemiBold" />
-                                        <TextBlock x:Name="ProfileCount" Style="{StaticResource Caption}"
-                                                   Margin="0,3,0,0" />
-                                    </StackPanel>
-                                </StackPanel>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
 
-                                <ListBox x:Name="ProfileList" BorderThickness="0"
-                                         Background="Transparent" Padding="0"
-                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                         SelectionChanged="OnProfileSelectionChanged">
-                                    <ListBox.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <UniformGrid Columns="3" />
-                                        </ItemsPanelTemplate>
-                                    </ListBox.ItemsPanel>
-                                    <ListBox.ItemContainerStyle>
-                                        <Style TargetType="ListBoxItem">
-                                            <Setter Property="Margin" Value="0,0,6,6" />
-                                            <Setter Property="Padding" Value="0" />
-                                            <Setter Property="Focusable" Value="False" />
-                                            <Setter Property="Template">
-                                                <Setter.Value>
-                                                    <ControlTemplate TargetType="ListBoxItem">
-                                                        <Border x:Name="Bd" CornerRadius="6"
-                                                                BorderThickness="2"
-                                                                BorderBrush="Transparent">
-                                                            <ContentPresenter />
-                                                        </Border>
-                                                        <ControlTemplate.Triggers>
-                                                            <Trigger Property="IsSelected" Value="True">
-                                                                <Setter TargetName="Bd" Property="BorderBrush"
-                                                                        Value="{StaticResource AccentBrush}" />
-                                                            </Trigger>
-                                                            <Trigger Property="IsMouseOver" Value="True">
-                                                                <Setter TargetName="Bd" Property="Background"
-                                                                        Value="#1AFFFFFF" />
-                                                            </Trigger>
-                                                        </ControlTemplate.Triggers>
-                                                    </ControlTemplate>
-                                                </Setter.Value>
-                                            </Setter>
-                                        </Style>
-                                    </ListBox.ItemContainerStyle>
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <StackPanel>
-                                                <Grid Height="116">
-                                                    <Border Background="#1A1A22" CornerRadius="4" />
-                                                    <Image Source="{Binding Video.CoverUrl}"
-                                                           Stretch="UniformToFill" />
-                                                    <Border VerticalAlignment="Bottom"
-                                                            HorizontalAlignment="Right"
-                                                            Background="#B0000000" CornerRadius="4"
-                                                            Padding="4,1" Margin="4">
-                                                        <TextBlock Text="{Binding DurationText}"
-                                                                   FontSize="10" Foreground="White" />
-                                                    </Border>
-                                                </Grid>
-                                                <TextBlock Text="{Binding LikeShortText}" FontSize="11"
-                                                           Foreground="#7A7A88" Margin="3,4,0,2"
-                                                           TextTrimming="CharacterEllipsis" />
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-
-                                <TextBlock x:Name="ProfileHint" Style="{StaticResource Caption}"
-                                           Text="点封面直接播这条" Margin="0,6,0,0" />
+                        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+                            <Image x:Name="ProfileAvatar" Width="44" Height="44"
+                                   Stretch="UniformToFill" />
+                            <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                                <TextBlock x:Name="ProfileName" FontSize="15"
+                                           FontWeight="SemiBold" />
+                                <TextBlock x:Name="ProfileCount" Style="{StaticResource Caption}"
+                                           Margin="0,3,0,0" />
                             </StackPanel>
-                        </ScrollViewer>
+                        </StackPanel>
+
+                        <ListBox x:Name="ProfileList" Grid.Row="1" BorderThickness="0"
+                                 Background="Transparent" Padding="0"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 SelectionChanged="OnProfileSelectionChanged">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Columns="3" />
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Margin" Value="0,0,6,6" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Focusable" Value="False" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <Border x:Name="Bd" CornerRadius="6"
+                                                        BorderThickness="2"
+                                                        Background="Transparent"
+                                                        BorderBrush="Transparent">
+                                                    <ContentPresenter />
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter TargetName="Bd" Property="BorderBrush"
+                                                                Value="{StaticResource AccentBrush}" />
+                                                    </Trigger>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Bd" Property="Background"
+                                                                Value="#1AFFFFFF" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel>
+                                        <Grid Height="116">
+                                            <Border Background="#1A1A22" CornerRadius="4" />
+                                            <Image Source="{Binding Video.CoverUrl}"
+                                                   Stretch="UniformToFill" />
+                                            <Border VerticalAlignment="Bottom"
+                                                    HorizontalAlignment="Right"
+                                                    Background="#B0000000" CornerRadius="4"
+                                                    Padding="4,1" Margin="4">
+                                                <TextBlock Text="{Binding DurationText}"
+                                                           FontSize="10" Foreground="White" />
+                                            </Border>
+                                        </Grid>
+                                        <TextBlock Text="{Binding LikeShortText}" FontSize="11"
+                                                   Foreground="#7A7A88" Margin="3,4,0,2"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </Grid>
 
                     <!-- 底部：进度 + 状态 -->

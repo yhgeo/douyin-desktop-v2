@@ -24,6 +24,12 @@ public sealed class VideoSurface : HwndHost
     /// <summary>子窗口创建完成。mpv 只能在这之后启动。</summary>
     public event EventHandler<IntPtr>? HandleCreated;
 
+    /// <summary>
+    /// 视频区被点了。HwndHost 是独立 Win32 窗口，WPF 收不到鼠标事件，
+    /// 只能在 WndProc 里拦下来转发。
+    /// </summary>
+    public event EventHandler? Clicked;
+
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
         _hwnd = Native.CreateWindowEx(
@@ -64,9 +70,14 @@ public sealed class VideoSurface : HwndHost
         {
             switch (msg)
             {
+                case Native.WM_LBUTTONDOWN:
+                    Clicked?.Invoke(this, EventArgs.Empty);
+                    return IntPtr.Zero;
+
                 case Native.WM_ERASEBKGND:
                     FillBlack(hWnd);
                     return new IntPtr(1);
+
                 case Native.WM_PAINT:
                     FillBlack(hWnd);
                     break;
@@ -107,6 +118,7 @@ public sealed class VideoSurface : HwndHost
 
         public const uint WM_PAINT = 0x000F;
         public const uint WM_ERASEBKGND = 0x0014;
+        public const uint WM_LBUTTONDOWN = 0x0201;
 
         public const int GWLP_WNDPROC = -4;
 
