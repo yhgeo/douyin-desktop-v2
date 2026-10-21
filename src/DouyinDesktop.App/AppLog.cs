@@ -9,9 +9,7 @@ namespace DouyinDesktop.App;
 internal static class AppLog
 {
     private static readonly object Gate = new();
-    private static readonly string Dir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "DouyinDesktop", "logs");
+    private static readonly string Dir = DouyinDesktop.Core.DouyinPaths.LogDirectory;
 
     private static string CurrentFile =>
         Path.Combine(Dir, $"app-{DateTime.Now:yyyyMMdd}.log");

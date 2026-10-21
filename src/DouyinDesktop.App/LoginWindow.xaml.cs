@@ -38,9 +38,7 @@ public partial class LoginWindow : Window
         try
         {
             // 独立的用户数据目录：登录状态能留住，下次不用重扫
-            string dataDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DouyinDesktop", "WebView2");
+            string dataDir = DouyinDesktop.Core.DouyinPaths.WebViewDirectory;
             Directory.CreateDirectory(dataDir);
 
             var options = new CoreWebView2EnvironmentOptions

@@ -38,9 +38,7 @@ public partial class DiagnoseWindow : Window
     {
         try
         {
-            string dataDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DouyinDesktop", "WebView2-Diagnose");
+            string dataDir = DouyinDesktop.Core.DouyinPaths.WebViewDiagnoseDirectory;
             Directory.CreateDirectory(dataDir);
 
             var options = new CoreWebView2EnvironmentOptions
@@ -187,10 +185,32 @@ public partial class DiagnoseWindow : Window
             {
                 int eq = pair.IndexOf('=');
                 string key = eq > 0 ? pair[..eq] : pair;
-                // a_bogus / msToken 这类每次不同，只看键名和长度
                 string val = eq > 0 ? pair[(eq + 1)..] : "";
-                _report.AppendLine($"  {key} = {(val.Length > 40 ? $"<{val.Length} 字符>" : val)}");
+
+                // 这几个是关键标识，要完整值才能和我们的对比
+                bool keepFull = key is "uifid" or "verifyFp" or "fp" or "webid" or "pre_log_id";
+                _report.AppendLine($"  {key} = {(keepFull ? val : (val.Length > 40 ? $"<{val.Length} 字符>" : val))}");
             }
+        }
+
+        // Cookie 清单（只要名字，值不写），用来对比我们抓的登录态缺哪些
+        try
+        {
+            var cookies = Web.CoreWebView2.CookieManager
+                .GetCookiesAsync("https://www.douyin.com").GetAwaiter().GetResult();
+
+            _report.AppendLine();
+            _report.AppendLine($"浏览器 Cookie 数量：{cookies.Count}");
+            _report.AppendLine("Cookie 名：" + string.Join(", ",
+                cookies.Select(c => c.Name).OrderBy(n => n)));
+
+            var uifidCookie = cookies.FirstOrDefault(c => c.Name == "UIFID");
+            if (uifidCookie is not null)
+                _report.AppendLine($"Cookie 里的 UIFID = {uifidCookie.Value}");
+        }
+        catch (Exception ex)
+        {
+            _report.AppendLine("读取 Cookie 失败：" + ex.Message);
         }
 
         AppLog.Write(_report.ToString());

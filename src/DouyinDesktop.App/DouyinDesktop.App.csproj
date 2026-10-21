@@ -8,9 +8,13 @@
     <Nullable>enable</Nullable>
     <AssemblyName>DouyinDesktop</AssemblyName>
     <RootNamespace>DouyinDesktop.App</RootNamespace>
-    <ApplicationIcon />
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="app.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DouyinDesktop.Core\DouyinDesktop.Core.csproj" />

@@ -31,9 +31,7 @@ public sealed class KeyMap
 
     public event Action? Changed;
 
-    public static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "DouyinDesktop", "settings.json");
+    public static string DefaultPath => DouyinDesktop.Core.DouyinPaths.SettingsFile;
 
     public KeyMap()
     {

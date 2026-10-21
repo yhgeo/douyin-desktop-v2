@@ -152,9 +152,7 @@ public sealed class DouyinSession
 
     // ================= 落盘 =================
 
-    public static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "DouyinDesktop", "session.json");
+    public static string DefaultPath => DouyinPaths.SessionFile;
 
     public static DouyinSession? Load(string? path = null)
     {
