@@ -1,0 +1,40 @@
+﻿<Window x:Class="DouyinDesktop.App.DiagnoseWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="推荐流诊断" Width="1000" Height="760"
+        WindowStyle="None" ResizeMode="CanResize"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource PanelBrush}">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Height="40" Background="{StaticResource BgBrush}"
+              MouseLeftButtonDown="OnTitleDrag">
+            <TextBlock Text="推荐流诊断（抓网页版真实响应）" Margin="18,0,0,0"
+                       VerticalAlignment="Center" FontSize="12"
+                       Foreground="{StaticResource SubTextBrush}" />
+            <Button Content="✕" Style="{StaticResource CloseButton}"
+                    HorizontalAlignment="Right" Click="OnCloseClick" />
+            <Border Height="1" VerticalAlignment="Bottom" Background="{StaticResource LineBrush}" />
+        </Grid>
+
+        <wv2:WebView2 x:Name="Web" Grid.Row="1" />
+
+        <Border Grid.Row="2" Background="{StaticResource BgBrush}" Padding="16,10">
+            <DockPanel>
+                <Button Content="完成并输出报告" DockPanel.Dock="Right"
+                        Style="{StaticResource LinkButton}" VerticalAlignment="Center"
+                        Margin="18,0,0,0" Click="OnFinishClick" />
+                <TextBlock x:Name="StatusText" Text="准备中…" FontSize="12"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource SubTextBrush}" TextWrapping="Wrap" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

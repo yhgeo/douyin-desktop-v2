@@ -14,6 +14,15 @@ public partial class App : Application
             if (args.ExceptionObject is Exception ex) ShowFatal(ex);
         };
         base.OnStartup(e);
+
+        // --diagnose：只开诊断窗口，不启动主界面
+        // （StartupUri 已在 App.xaml 里去掉，否则会两个窗口一起开）
+        Window win = e.Args.Contains("--diagnose")
+            ? new DiagnoseWindow()
+            : new MainWindow();
+
+        MainWindow = win;
+        win.Show();
     }
 
     private void OnDispatcherException(object sender, DispatcherUnhandledExceptionEventArgs e)

@@ -17,8 +17,6 @@ public partial class MainWindow : Window
     private readonly KeyMap _keyMap = KeyMap.Load();
     private readonly List<Aweme> _items = new();
     private readonly HashSet<string> _presented = new();
-    /// <summary>已经混进列表的图集 id，避免重复插入。</summary>
-    private readonly HashSet<string> _injectedImages = new();
 
     // 图集：图片走单独的 HttpClient，缓存最近看过的几十张
     private readonly HttpClient _imageHttp = CreateImageHttp();
@@ -250,10 +248,6 @@ public partial class MainWindow : Window
 
             PushStatus($"推荐流 +{result.Items.Count} 条 / {result.ElapsedMs}ms");
 
-            // 推荐流接口不推图文（实测 58 条 0 条），后台从作者主页捞图集补进列表，
-            // 这样正常往下刷也能刷到图集
-            if (!_authorMode) _ = InjectImagesAsync(result.Items);
-
             if (_index < 0 && _items.Count > 0)
                 await PlayIndexAsync(0);
             else
@@ -471,49 +465,6 @@ public partial class MainWindow : Window
         if (e.ExtentHeight <= 0) return;
         if (e.VerticalOffset + e.ViewportHeight < e.ExtentHeight - 240) return;
         if (_commentsHasMore && !_commentsLoading) _ = LoadCommentsAsync(reset: false);
-    }
-
-    /// <summary>
-    /// 从推荐流里的作者主页捞图集，插进当前列表。
-    ///
-    /// 为什么这么做：PC web 的两个推荐接口（module/feed、tab/feed）都只返回视频，
-    /// 服务端层面就没有图文（实测 module/feed 58 条、tab/feed 6 条，aweme_type 全是 0）。
-    /// GitHub 上现成的项目也都是"按作品 ID 取图集"，没有能改推荐流内容的方案。
-    /// 所以只能自己补：刷推荐时也能遇到图集，体验上接近官方。
-    /// </summary>
-    private async Task InjectImagesAsync(IReadOnlyList<Aweme> source)
-    {
-        var authors = source
-            .Select(x => x.Author)
-            .Where(a => a is { SecUid.Length: > 0 })
-            .DistinctBy(a => a!.SecUid)
-            .Take(2)
-            .ToList();
-
-        foreach (var author in authors)
-        {
-            if (_authorMode) return;
-
-            try
-            {
-                var posts = await _client.GetUserPostsAsync(author!.SecUid);
-                if (!posts.Success) continue;
-
-                var image = posts.Items.FirstOrDefault(x => x.IsImagePost && _injectedImages.Add(x.Id));
-                if (image is null) continue;
-
-                // 插在当前条目后第 2 位：让用户"再刷一两条"就遇到，而不是立刻跳
-                int insertAt = Math.Min(Math.Max(_index, 0) + 2, _items.Count);
-                _items.Insert(insertAt, image);
-                AppLog.Write($"混入图集 {image.Id}（@{author.Nickname}）到第 {insertAt + 1} 条");
-                UpdateIndexLabel();
-                return;
-            }
-            catch (Exception ex)
-            {
-                AppLog.Write("混入图集失败：" + ex.Message);
-            }
-        }
     }
 
     private void OnToggleReplies(object sender, RoutedEventArgs e)
