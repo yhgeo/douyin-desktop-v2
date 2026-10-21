@@ -583,7 +583,9 @@ public partial class MainWindow : Window
 
         _ = Task.Run(async () =>
         {
-            foreach (int offset in new[] { 1, -1, 2, -2 })
+            // 顺序即优先级：用户主要往下刷，所以 +1 > +2 > -1。
+            // 带宽不够时，先保证马上要切的那条完整，回退那条放到最后。
+            foreach (int offset in new[] { 1, 2, -1 })
             {
                 if (cts.IsCancellationRequested) return;
 
