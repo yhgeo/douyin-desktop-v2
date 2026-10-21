@@ -2,185 +2,213 @@
 using System.Text.Json;
 using DouyinDesktop.Core.Signing;
 
-// 端到端验证：用 C# 算的 a_bogus 请求真实推荐流。
-// 目的不是"能跑"，而是确认服务端接受 C# 的签名（golden test 只证明和 Python 算得一样）。
+// 端到端验证：不依赖任何硬编码凭据，自己注册 ttwid、自己生成 s_v_web_id、
+// 自己从响应头捡 msToken，然后请求真实推荐流。
+// 这是"能不能独立跑起来"的判定标准。
 
 const string Ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                   "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
 
-string svWebId = GenerateSvWebId();
-Console.WriteLine($"s_v_web_id = {svWebId}");
-
-// 参数顺序必须与浏览器抓包一致：签名是对这串字节做摘要的，顺序变了签名就不同
-var ps = new (string Key, string Value)[]
-{
-    ("device_platform", "webapp"),
-    ("aid", "6383"),
-    ("channel", "channel_pc_web"),
-    ("module_id", "3003101"),
-    ("count", "10"),
-    ("filterGids", ""),
-    ("presented_ids", ""),
-    ("refresh_index", "2"),
-    ("refer_id", ""),
-    ("refer_type", "10"),
-    ("awemePcRecRawData", "{\"is_client\":false}"),
-    ("Seo-Flag", "0"),
-    ("install_time", "1715480185"),
-    ("pc_client_type", "1"),
-    ("update_version_code", "170400"),
-    ("version_code", "170400"),
-    ("version_name", "17.4.0"),
-    ("cookie_enabled", "true"),
-    ("screen_width", "2560"),
-    ("screen_height", "1440"),
-    ("browser_language", "zh-CN"),
-    ("browser_platform", "Win32"),
-    ("browser_name", "Chrome"),
-    ("browser_version", "151.0.0.0"),
-    ("browser_online", "true"),
-    ("engine_name", "Blink"),
-    ("engine_version", "151.0.0.0"),
-    ("os_name", "Windows"),
-    ("os_version", "10"),
-    ("cpu_core_num", "20"),
-    ("device_memory", "32"),
-    ("platform", "PC"),
-    ("downlink", "10"),
-    ("effective_type", "4g"),
-    ("round_trip_time", "100"),
-    ("webid", "7699090210374305299"),
-    ("msToken", "2PifiICp6AH_I_ce2yPctWAdBa7NygDWOMYfOgz2sIAHULM8eeucE21SZbUd3-jsl29xFq6o_dGKWb9CNzLs-GQVwc4cwyqo-sz4TFqjA-bbEb39xO1z61Cd6WMO_crt6b4i2WWvlcgoXD2nKLwhcJ_RlyK5z3oKMp0="),
-};
-
-string query = string.Join("&", ps.Select(p => p.Key + "=" + Quote(p.Value)));
-
-var signer = new ABogus(@fixed: false, userAgent: Ua);
-string abogus = signer.SignQuery(query, "", "www.douyin.com");
-Console.WriteLine($"a_bogus  = {abogus}  (长度 {abogus.Length})");
-
-string finalQuery = query
-    + "&a_bogus=" + Quote(abogus)
-    + "&verifyFp=" + svWebId
-    + "&fp=" + svWebId;
-
-string url = "https://www.douyin.com/aweme/v1/web/module/feed/?" + finalQuery;
-
-// 游客态 Cookie：这批是 Python 版 bootstrap 从服务端换来的。
-// 先用固定值验证签名是否被接受，通过后再实现自动获取。
-var cookies = new Dictionary<string, string>
-{
-    ["s_v_web_id"] = svWebId,
-    ["ttwid"] = "1%7C87hgyhCqN1ftove_5ud38ALMHJgNozKHxk5zmczSgFQ%7C1792584136%7Cb66e319d5b6f14acc88d836d29a8b1ca454a96ec9e95af7c7c2f5fe890531bc6",
-    ["__ac_nonce"] = "06ad8a9c700f8f0264103",
-    ["__ac_signature"] = "_02B4Z6wo00f019z8XJgAAIDCUbwlCMaf3ivc3FgAAJ3x39",
-    ["bd_ticket_guard_client_data"] = "eyJiZC10aWNrZXQtZ3VhcmQtdmVyc2lvbiI6MiwiYmQtdGlja2V0LWd1YXJkLWl0ZXJhdGlvbi12ZXJzaW9uIjoxLCJiZC10aWNrZXQtZ3VhcmQtcmVlX3B1YmxpYy1rZXkiOiJCRDNTU0J2ZjVrZXkwSVJNaWRTeTFmNWJsUEg3MzFmNUtrRi9rTURuUm1sVzZNdDk0cVJtLzB4SkxiMnhvSE0zZXpQRDY4Z2tLRjVpZGh1QjhMQTVwd1E9IiwiYmQtdGlja2V0LWd1YXJkLXdlYi12ZXJzaW9uIjoyfQ%3D%3D",
-    ["bd_ticket_guard_client_web_domain"] = "2",
-    ["passport_csrf_token"] = "43c069153eb28c69438d68de4a8e4a10",
-    ["passport_csrf_token_default"] = "43c069153eb28c69438d68de4a8e4a10",
-    ["passport_auth_mix_state"] = "dl4zu6co79tuvfszg9zzykusne9mw5tkfb7jy6wrn5c72ngn",
-    ["x-web-secsdk-uid"] = "93859323-0ecb-4db9-a16b-cc576e7bf416",
-    ["is_dash_user"] = "1",
-    ["hevc_supported"] = "true",
-    ["IsDouyinActive"] = "true",
-    ["enter_pc_once"] = "1",
-    ["is_support_rtm_web_ts"] = "1",
-    ["my_rd"] = "2",
-    ["home_can_add_dy_2_desktop"] = "%220%22",
-    ["strategyABtestKey"] = "%221792584135.529%22",
-    ["dy_swidth"] = "2560",
-    ["dy_sheight"] = "1440",
-    ["device_web_cpu_core"] = "20",
-    ["device_web_memory_size"] = "32",
-    ["architecture"] = "amd64",
-    ["biz_trace_id"] = "2ce55cb5",
-    ["fpk1"] = "U2FsdGVkX1/ow0tkXbABmZeCe/rf9LSU/rCXOFEmBgemlV1brPK5LoLzcpUS28X8Kku5NQ2CFXMzdOlfAX+q0Q==",
-    ["fpk2"] = "6967ec7261b3cbe6a91d798c6b951c60",
-    ["stream_recommend_feed_params"] = "%22%7B%5C%22cookie_enabled%5C%22%3Atrue%2C%5C%22screen_width%5C%22%3A2560%2C%5C%22screen_height%5C%22%3A1440%2C%5C%22browser_online%5C%22%3Atrue%2C%5C%22cpu_core_num%5C%22%3A20%2C%5C%22device_memory%5C%22%3A32%2C%5C%22downlink%5C%22%3A10%2C%5C%22effective_type%5C%22%3A%5C%224g%5C%22%2C%5C%22round_trip_time%5C%22%3A0%7D%22",
-};
-
-string cookieHeader = string.Join("; ", cookies.Select(kv => kv.Key + "=" + kv.Value));
-
-using var http = new HttpClient(new HttpClientHandler { UseCookies = false });
+using var http = new HttpClient(new HttpClientHandler { UseCookies = false, AllowAutoRedirect = true });
 http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", Ua);
-http.DefaultRequestHeaders.TryAddWithoutValidation("Referer", "https://www.douyin.com/");
-http.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
-http.DefaultRequestHeaders.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8,zh-TW;q=0.7,ja;q=0.6");
-http.DefaultRequestHeaders.TryAddWithoutValidation("sec-ch-ua", "\"Not=A?Brand\";v=\"99\", \"Google Chrome\";v=\"151\", \"Chromium\";v=\"151\"");
-http.DefaultRequestHeaders.TryAddWithoutValidation("sec-ch-ua-mobile", "?0");
-http.DefaultRequestHeaders.TryAddWithoutValidation("sec-ch-ua-platform", "\"Windows\"");
-http.DefaultRequestHeaders.TryAddWithoutValidation("sec-fetch-dest", "empty");
-http.DefaultRequestHeaders.TryAddWithoutValidation("sec-fetch-mode", "cors");
-http.DefaultRequestHeaders.TryAddWithoutValidation("sec-fetch-site", "same-origin");
-http.DefaultRequestHeaders.TryAddWithoutValidation("priority", "u=1, i");
-http.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", cookieHeader);
 
-Console.WriteLine("\n请求中...");
-var sw = System.Diagnostics.Stopwatch.StartNew();
-try
+// 1) 注册匿名设备标识
+string ttwid = await RegisterTtwidAsync(http);
+Console.WriteLine($"[1] ttwid = {(ttwid.Length > 40 ? ttwid[..40] + "..." : ttwid)}  长度 {ttwid.Length}");
+if (ttwid.Length == 0)
 {
-    using var resp = await http.GetAsync(url);
-    sw.Stop();
-    string body = await resp.Content.ReadAsStringAsync();
+    Console.WriteLine("    ttwid 注册失败，后面大概率会被风控");
+}
 
-    Console.WriteLine($"HTTP {(int)resp.StatusCode}  耗时 {sw.ElapsedMilliseconds}ms  响应 {body.Length} 字符");
-    Console.WriteLine("--- 响应头 ---");
-    foreach (var h in resp.Headers) Console.WriteLine($"  {h.Key}: {string.Join(", ", h.Value)}");
-    foreach (var h in resp.Content.Headers) Console.WriteLine($"  {h.Key}: {string.Join(", ", h.Value)}");
+// 2) 生成设备指纹
+string svWebId = GenerateSvWebId();
+Console.WriteLine($"[2] s_v_web_id = {svWebId}");
 
-    if (!body.TrimStart().StartsWith('{'))
-    {
-        Console.WriteLine("非 JSON 响应，前 300 字：");
-        Console.WriteLine(body.Length > 300 ? body[..300] : body);
-        return 1;
-    }
+// 3) 请求推荐流；第一次 msToken 为空，服务端可能在响应头里下发一个
+string msToken = "";
+int cards = 0;
 
-    using var doc = JsonDocument.Parse(body);
-    var root = doc.RootElement;
-    int statusCode = root.TryGetProperty("status_code", out var sc) ? sc.GetInt32() : -1;
-    int cards = root.TryGetProperty("cards", out var c) && c.ValueKind == JsonValueKind.Array ? c.GetArrayLength() : 0;
-    int awemeList = root.TryGetProperty("aweme_list", out var al) && al.ValueKind == JsonValueKind.Array ? al.GetArrayLength() : 0;
-
-    Console.WriteLine($"status_code={statusCode}  cards={cards}  aweme_list={awemeList}");
+for (int attempt = 1; attempt <= 3; attempt++)
+{
+    var result = await FetchFeedAsync(http, ttwid, svWebId, msToken, attempt);
+    cards = result.Cards;
 
     if (cards > 0)
     {
-        Console.WriteLine("\n=== 服务端接受了 C# 签名 ===");
-        int i = 0;
-        foreach (var card in root.GetProperty("cards").EnumerateArray())
+        Console.WriteLine($"\n=== 第 {attempt} 次成功：{cards} 条 ===  总耗时 {result.ElapsedMs}ms");
+        foreach (var item in result.Items.Take(3))
+            Console.WriteLine($"  {item.Id}  uri={item.Uri}  {Truncate(item.Desc, 28)}");
+
+        // 顺带验证播放地址能不能换出来
+        if (result.Items.Count > 0)
         {
-            if (!card.TryGetProperty("aweme", out var aw)) continue;
-            using var inner = aw.ValueKind == JsonValueKind.String
-                ? JsonDocument.Parse(aw.GetString()!)
-                : JsonDocument.Parse(aw.GetRawText());
-            var a = inner.RootElement;
-
-            string id = a.TryGetProperty("aweme_id", out var idEl) ? idEl.GetString() ?? "?" : "?";
-            string desc = a.TryGetProperty("desc", out var d) ? (d.GetString() ?? "") : "";
-            string uri = "";
-            if (a.TryGetProperty("video", out var v) && v.TryGetProperty("play_addr", out var pa)
-                && pa.TryGetProperty("uri", out var uriEl))
-                uri = uriEl.GetString() ?? "";
-
-            Console.WriteLine($"  #{i++} {id}  uri={uri}  {Truncate(desc, 30)}");
-            if (i >= 3) break;
+            string playUrl = BuildPlayUrl(result.Items[0].Uri, "1080p");
+            Console.WriteLine($"\n[4] 播放地址（302 入口）:\n    {playUrl}");
+            using var head = new HttpRequestMessage(HttpMethod.Get, playUrl);
+            head.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/video/{result.Items[0].Id}");
+            head.Headers.TryAddWithoutValidation("Range", "bytes=0-1023");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            using var pr = await http.SendAsync(head, HttpCompletionOption.ResponseHeadersRead);
+            sw.Stop();
+            Console.WriteLine($"    最终状态 {(int)pr.StatusCode}  类型 {pr.Content.Headers.ContentType}  " +
+                              $"耗时 {sw.ElapsedMilliseconds}ms  重定向 {pr.RequestMessage?.RequestUri?.Host}");
         }
         return 0;
     }
 
-    Console.WriteLine("\n没有 cards，响应片段：");
-    Console.WriteLine(body.Length > 800 ? body[..800] : body);
-    return 1;
+    Console.WriteLine($"\n[3] 第 {attempt} 次：cards=0（HTTP {result.Status}，{result.BodyLength} 字节）");
+    if (!string.IsNullOrEmpty(result.NewMsToken))
+    {
+        msToken = result.NewMsToken;
+        Console.WriteLine($"    拿到服务端下发的 msToken（{msToken.Length} 字符），重试");
+    }
+    else
+    {
+        Console.WriteLine("    响应头里没有 X-Ms-Token，无法自动续期");
+        if (result.BodyLength > 0 && result.BodySnippet.Length > 0)
+            Console.WriteLine("    响应片段：" + Truncate(result.BodySnippet, 200));
+        break;
+    }
 }
-catch (Exception ex)
+
+Console.WriteLine($"\n未拿到推荐流（cards={cards}）");
+return 1;
+
+// ================= 请求逻辑 =================
+
+static async Task<(int Cards, List<(string Id, string Uri, string Desc)> Items, int ElapsedMs,
+                   int Status, int BodyLength, string BodySnippet, string NewMsToken)>
+    FetchFeedAsync(HttpClient http, string ttwid, string svWebId, string msToken, int attempt)
 {
-    Console.WriteLine($"请求失败：{ex.GetType().Name}: {ex.Message}");
-    return 1;
+    var ps = new (string Key, string Value)[]
+    {
+        ("device_platform", "webapp"), ("aid", "6383"), ("channel", "channel_pc_web"),
+        ("module_id", "3003101"), ("count", "10"), ("filterGids", ""), ("presented_ids", ""),
+        ("refresh_index", "2"), ("refer_id", ""), ("refer_type", "10"),
+        ("awemePcRecRawData", "{\"is_client\":false}"), ("Seo-Flag", "0"),
+        ("install_time", "1715480185"), ("pc_client_type", "1"),
+        ("update_version_code", "170400"), ("version_code", "170400"), ("version_name", "17.4.0"),
+        ("cookie_enabled", "true"), ("screen_width", "2560"), ("screen_height", "1440"),
+        ("browser_language", "zh-CN"), ("browser_platform", "Win32"),
+        ("browser_name", "Chrome"), ("browser_version", "151.0.0.0"), ("browser_online", "true"),
+        ("engine_name", "Blink"), ("engine_version", "151.0.0.0"),
+        ("os_name", "Windows"), ("os_version", "10"),
+        ("cpu_core_num", "20"), ("device_memory", "32"),
+        ("platform", "PC"), ("downlink", "10"), ("effective_type", "4g"), ("round_trip_time", "100"),
+        ("webid", GenerateFakeWebId()), ("msToken", msToken),
+    };
+
+    string query = string.Join("&", ps.Select(p => p.Key + "=" + Quote(p.Value)));
+    var signer = new ABogus(@fixed: false, userAgent: Ua);
+    string abogus = signer.SignQuery(query, "", "www.douyin.com");
+
+    string url = "https://www.douyin.com/aweme/v1/web/module/feed/?" + query
+               + "&a_bogus=" + Quote(abogus)
+               + "&verifyFp=" + svWebId + "&fp=" + svWebId;
+
+    using var req = new HttpRequestMessage(HttpMethod.Get, url);
+    req.Headers.TryAddWithoutValidation("Referer", "https://www.douyin.com/");
+    req.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
+    req.Headers.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9");
+    req.Headers.TryAddWithoutValidation("sec-ch-ua", "\"Not=A?Brand\";v=\"99\", \"Google Chrome\";v=\"151\", \"Chromium\";v=\"151\"");
+    req.Headers.TryAddWithoutValidation("sec-ch-ua-mobile", "?0");
+    req.Headers.TryAddWithoutValidation("sec-ch-ua-platform", "\"Windows\"");
+    req.Headers.TryAddWithoutValidation("sec-fetch-dest", "empty");
+    req.Headers.TryAddWithoutValidation("sec-fetch-mode", "cors");
+    req.Headers.TryAddWithoutValidation("sec-fetch-site", "same-origin");
+    req.Headers.TryAddWithoutValidation("priority", "u=1, i");
+
+    var cookieParts = new List<string> { $"s_v_web_id={svWebId}" };
+    if (!string.IsNullOrEmpty(ttwid)) cookieParts.Add($"ttwid={ttwid}");
+    req.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", cookieParts));
+
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    using var resp = await http.SendAsync(req);
+    string body = await resp.Content.ReadAsStringAsync();
+    sw.Stop();
+
+    string newMsToken = resp.Headers.TryGetValues("X-Ms-Token", out var mt) ? mt.FirstOrDefault() ?? "" : "";
+
+    var items = new List<(string, string, string)>();
+    int cards = 0;
+
+    if (body.TrimStart().StartsWith('{'))
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("cards", out var c) && c.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var card in c.EnumerateArray())
+                {
+                    if (!card.TryGetProperty("aweme", out var aw)) continue;
+                    cards++;
+                    using var inner = aw.ValueKind == JsonValueKind.String
+                        ? JsonDocument.Parse(aw.GetString()!)
+                        : JsonDocument.Parse(aw.GetRawText());
+                    var a = inner.RootElement;
+                    string id = a.TryGetProperty("aweme_id", out var i) ? i.GetString() ?? "" : "";
+                    string desc = a.TryGetProperty("desc", out var d) ? d.GetString() ?? "" : "";
+                    string uri = "";
+                    if (a.TryGetProperty("video", out var v) && v.TryGetProperty("play_addr", out var pa)
+                        && pa.TryGetProperty("uri", out var u))
+                        uri = u.GetString() ?? "";
+                    items.Add((id, uri, desc));
+                }
+            }
+        }
+        catch (JsonException) { /* 当作失败处理 */ }
+    }
+
+    return (cards, items, (int)sw.ElapsedMilliseconds, (int)resp.StatusCode, body.Length,
+            Truncate(body, 200), newMsToken);
 }
 
-// ---- 工具 ----
+// 网页播放器自己走的入口：用 uri 换真实流，服务端 302 到 CDN
+static string BuildPlayUrl(string uri, string ratio)
+    => $"https://www.douyin.com/aweme/v1/play/?video_id={uri}&ratio={ratio}&line=0";
 
-// 等价于 Python 的 urllib.parse.quote(s, safe="")：只保留字母数字和 _.-~
+// ================= 凭据获取 =================
+
+static async Task<string> RegisterTtwidAsync(HttpClient http)
+{
+    var body = new
+    {
+        region = "cn", aid = 1768, needFid = false, service = "www.douyin.com",
+        migrate_info = new { ticket = "", source = "node" },
+        cbUrlProtocol = "https", union = true,
+    };
+
+    using var req = new HttpRequestMessage(HttpMethod.Post, "https://ttwid.bytedance.com/ttwid/union/register/");
+    req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+    req.Headers.TryAddWithoutValidation("User-Agent", Ua);
+
+    try
+    {
+        using var resp = await http.SendAsync(req);
+        if (resp.Headers.TryGetValues("Set-Cookie", out var vals))
+        {
+            foreach (string v in vals)
+            {
+                int idx = v.IndexOf("ttwid=", StringComparison.Ordinal);
+                if (idx < 0) continue;
+                string tail = v[(idx + 6)..];
+                int semi = tail.IndexOf(';');
+                return semi > 0 ? tail[..semi] : tail;
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("    ttwid 请求异常：" + ex.Message);
+    }
+    return "";
+}
+
+// ================= 工具 =================
+
+// 等价于 Python 的 urllib.parse.quote(s, safe="")
 static string Quote(string s)
 {
     var bytes = Encoding.UTF8.GetBytes(s);
@@ -197,7 +225,6 @@ static string Quote(string s)
     return sb.ToString();
 }
 
-// verify_<base36 时间戳>_<8>_<4>_4xx_<8|9|a|b>xxx_<12>
 static string GenerateSvWebId()
 {
     const string charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -208,11 +235,8 @@ static string GenerateSvWebId()
         ts36.Insert(0, "0123456789abcdefghijklmnopqrstuvwxyz"[(int)(n % 36)]);
         n /= 36;
     }
-
     string Rnd(int k) => string.Concat(Enumerable.Range(0, k).Select(_ => charset[Random.Shared.Next(charset.Length)]));
-
-    string groups = $"{Rnd(8)}_{Rnd(4)}_4{Rnd(3)}_{"89ab"[Random.Shared.Next(4)]}{Rnd(3)}_{Rnd(12)}";
-    return $"verify_{ts36}_{groups}";
+    return $"verify_{ts36}_{Rnd(8)}_{Rnd(4)}_4{Rnd(3)}_{"89ab"[Random.Shared.Next(4)]}{Rnd(3)}_{Rnd(12)}";
 }
 
 static string GenerateFakeWebId()
