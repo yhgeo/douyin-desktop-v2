@@ -6,115 +6,156 @@
         MinHeight="560" MinWidth="900"
         Background="{StaticResource BgBrush}"
         WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        InputMethod.IsInputMethodEnabled="False"
         PreviewKeyDown="OnPreviewKeyDown"
         MouseWheel="OnMouseWheel"
         Loaded="OnLoaded"
         Closing="OnClosing"
+        StateChanged="OnWindowStateChanged"
         SizeChanged="OnSizeChanged">
 
-    <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
+    <!--
+        无边框窗口：WindowStyle 从头到尾都是 None。
+        为什么不用默认边框 + 全屏时改 WindowStyle —— 那会让 WPF 重建 HWND，
+        HwndHost 重建后 mpv 嵌在旧句柄上，画面就没了，只能重启播放器（约 300ms 黑屏）。
+        这里把"边框"这件事交给 WindowChrome，全屏只是隐藏标题栏 + 最大化，句柄不动。
+    -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="38"
+                      ResizeBorderThickness="6"
+                      GlassFrameThickness="0"
+                      CornerRadius="0"
+                      UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
 
-        <!-- 视频区：mpv 直接往这里画。任何 WPF 元素都盖不住它，所以这里不放文字 -->
-        <Grid x:Name="VideoHost" Grid.Column="0" Background="Black" SizeChanged="OnVideoHostSizeChanged">
-            <local:VideoSurface x:Name="Surface"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center" />
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 自绘标题栏 -->
+        <Grid x:Name="TitleBar" Grid.Row="0" Height="38" Background="{StaticResource BgBrush}">
+            <TextBlock Text="抖音" Margin="16,0,0,0" VerticalAlignment="Center"
+                       FontSize="12" Foreground="{StaticResource SubTextBrush}" />
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                        WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button Content="—" Style="{StaticResource CaptionButton}" Click="OnMinimizeClick" />
+                <Button x:Name="MaxButton" Content="□" Style="{StaticResource CaptionButton}"
+                        Click="OnMaximizeClick" />
+                <Button Content="✕" Style="{StaticResource CloseButton}" Click="OnCloseClick" />
+            </StackPanel>
+
+            <Border Height="1" VerticalAlignment="Bottom" Background="{StaticResource LineBrush}" />
         </Grid>
 
-        <!-- 信息栏 -->
-        <Border x:Name="SidePanel" Grid.Column="1" Width="384"
-                Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
-            <Grid Margin="28,30,28,22">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-                <!-- 顶部：推荐 + 序号 -->
-                <DockPanel Grid.Row="0" Margin="0,0,0,22">
-                    <Ellipse Width="7" Height="7" Fill="{StaticResource AccentBrush}"
-                             VerticalAlignment="Center" DockPanel.Dock="Left" />
-                    <TextBlock x:Name="TabLabel" Text="推荐" Margin="8,0,0,0"
-                               FontSize="13" Foreground="{StaticResource SubTextBrush}"
-                               VerticalAlignment="Center" />
-                    <TextBlock x:Name="IndexLabel" Text="" HorizontalAlignment="Right"
-                               Style="{StaticResource Caption}" VerticalAlignment="Center" />
-                </DockPanel>
-
-                <!-- 内容（窗口矮时可滚动） -->
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel>
-                        <TextBlock x:Name="AuthorText" Text="正在连接…" FontSize="22"
-                                   FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,10" />
-
-                        <TextBlock x:Name="DescText" Text="" FontSize="14" LineHeight="23"
-                                   TextWrapping="Wrap" Foreground="#D6D6DE" Margin="0,0,0,18" />
-
-                        <StackPanel x:Name="StatsPanel" Orientation="Horizontal" Margin="0,0,0,18">
-                            <TextBlock x:Name="LikeText" Style="{StaticResource Stat}" />
-                            <TextBlock x:Name="CommentText" Style="{StaticResource Stat}" />
-                            <TextBlock x:Name="ShareText" Style="{StaticResource Stat}" />
-                        </StackPanel>
-
-                        <TextBlock x:Name="MusicText" Style="{StaticResource Caption}"
-                                   TextWrapping="Wrap" Margin="0,0,0,4" />
-
-                        <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,22,0,22" />
-
-                        <TextBlock x:Name="TimeText" Style="{StaticResource Caption}"
-                                   Text="0:00 / 0:00" Margin="0,0,0,18" />
-
-                        <!-- 快捷键 -->
-                        <Grid Margin="0,0,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="76" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="26" />
-                                <RowDefinition Height="26" />
-                                <RowDefinition Height="26" />
-                                <RowDefinition Height="26" />
-                                <RowDefinition Height="26" />
-                                <RowDefinition Height="26" />
-                            </Grid.RowDefinitions>
-
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="↑ ↓" Style="{StaticResource Caption}" />
-                            <TextBlock Grid.Row="0" Grid.Column="1" Text="上一条 / 下一条" Style="{StaticResource Caption}" />
-
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="空格" Style="{StaticResource Caption}" />
-                            <TextBlock Grid.Row="1" Grid.Column="1" Text="暂停 / 继续" Style="{StaticResource Caption}" />
-
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="← →" Style="{StaticResource Caption}" />
-                            <TextBlock Grid.Row="2" Grid.Column="1" Text="快退 / 快进 5 秒" Style="{StaticResource Caption}" />
-
-                            <TextBlock Grid.Row="3" Grid.Column="0" Text="M" Style="{StaticResource Caption}" />
-                            <TextBlock Grid.Row="3" Grid.Column="1" Text="静音" Style="{StaticResource Caption}" />
-
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="F" Style="{StaticResource Caption}" />
-                            <TextBlock Grid.Row="4" Grid.Column="1" Text="全屏（Esc 退出）" Style="{StaticResource Caption}" />
-
-                            <TextBlock Grid.Row="5" Grid.Column="0" Text="R" Style="{StaticResource Caption}" />
-                            <TextBlock Grid.Row="5" Grid.Column="1" Text="换一批推荐" Style="{StaticResource Caption}" />
-                        </Grid>
-                    </StackPanel>
-                </ScrollViewer>
-
-                <!-- 底部：进度 + 状态 -->
-                <StackPanel Grid.Row="2" Margin="0,20,0,0">
-                    <ProgressBar x:Name="Progress" Style="{StaticResource ThinProgress}"
-                                 Minimum="0" Maximum="1" Value="0" />
-                    <TextBlock x:Name="StatusText" Style="{StaticResource Caption}"
-                               Text="准备中…" Margin="0,12,0,0" TextWrapping="Wrap" />
-                </StackPanel>
+            <!-- 视频区：mpv 直接往这里画。任何 WPF 元素都盖不住它，所以这里不放文字 -->
+            <Grid x:Name="VideoHost" Grid.Column="0" Background="Black" SizeChanged="OnVideoHostSizeChanged">
+                <local:VideoSurface x:Name="Surface"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" />
             </Grid>
-        </Border>
+
+            <!-- 信息栏 -->
+            <Border x:Name="SidePanel" Grid.Column="1" Width="384"
+                    Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
+                <Grid Margin="28,30,28,22">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- 顶部：推荐 + 序号 -->
+                    <DockPanel Grid.Row="0" Margin="0,0,0,22">
+                        <Ellipse Width="7" Height="7" Fill="{StaticResource AccentBrush}"
+                                 VerticalAlignment="Center" DockPanel.Dock="Left" />
+                        <TextBlock x:Name="TabLabel" Text="推荐" Margin="8,0,0,0"
+                                   FontSize="13" Foreground="{StaticResource SubTextBrush}"
+                                   VerticalAlignment="Center" />
+                        <TextBlock x:Name="IndexLabel" Text="" HorizontalAlignment="Right"
+                                   Style="{StaticResource Caption}" VerticalAlignment="Center" />
+                    </DockPanel>
+
+                    <!-- 内容（窗口矮时可滚动） -->
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <TextBlock x:Name="AuthorText" Text="正在连接…" FontSize="22"
+                                       FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,10" />
+
+                            <TextBlock x:Name="DescText" Text="" FontSize="14" LineHeight="23"
+                                       TextWrapping="Wrap" Foreground="#D6D6DE" Margin="0,0,0,18" />
+
+                            <StackPanel x:Name="StatsPanel" Orientation="Horizontal" Margin="0,0,0,18">
+                                <TextBlock x:Name="LikeText" Style="{StaticResource Stat}" />
+                                <TextBlock x:Name="CommentText" Style="{StaticResource Stat}" />
+                                <TextBlock x:Name="ShareText" Style="{StaticResource Stat}" />
+                            </StackPanel>
+
+                            <TextBlock x:Name="MusicText" Style="{StaticResource Caption}"
+                                       TextWrapping="Wrap" Margin="0,0,0,4" />
+
+                            <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,22,0,22" />
+
+                            <TextBlock x:Name="TimeText" Style="{StaticResource Caption}"
+                                       Text="0:00 / 0:00" Margin="0,0,0,18" />
+
+                            <!-- 快捷键 -->
+                            <Grid Margin="0,0,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="76" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="26" />
+                                    <RowDefinition Height="26" />
+                                    <RowDefinition Height="26" />
+                                    <RowDefinition Height="26" />
+                                    <RowDefinition Height="26" />
+                                    <RowDefinition Height="26" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="↑ ↓" Style="{StaticResource Caption}" />
+                                <TextBlock Grid.Row="0" Grid.Column="1" Text="上一条 / 下一条" Style="{StaticResource Caption}" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="空格" Style="{StaticResource Caption}" />
+                                <TextBlock Grid.Row="1" Grid.Column="1" Text="暂停 / 继续" Style="{StaticResource Caption}" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="← →" Style="{StaticResource Caption}" />
+                                <TextBlock Grid.Row="2" Grid.Column="1" Text="快退 / 快进 5 秒" Style="{StaticResource Caption}" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="M" Style="{StaticResource Caption}" />
+                                <TextBlock Grid.Row="3" Grid.Column="1" Text="静音" Style="{StaticResource Caption}" />
+
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="F" Style="{StaticResource Caption}" />
+                                <TextBlock Grid.Row="4" Grid.Column="1" Text="全屏（Esc 退出）" Style="{StaticResource Caption}" />
+
+                                <TextBlock Grid.Row="5" Grid.Column="0" Text="R" Style="{StaticResource Caption}" />
+                                <TextBlock Grid.Row="5" Grid.Column="1" Text="换一批推荐" Style="{StaticResource Caption}" />
+                            </Grid>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- 底部：进度 + 状态 -->
+                    <StackPanel Grid.Row="2" Margin="0,20,0,0">
+                        <ProgressBar x:Name="Progress" Style="{StaticResource ThinProgress}"
+                                     Minimum="0" Maximum="1" Value="0" />
+                        <TextBlock x:Name="StatusText" Style="{StaticResource Caption}"
+                                   Text="准备中…" Margin="0,12,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

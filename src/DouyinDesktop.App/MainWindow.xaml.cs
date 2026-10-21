@@ -20,12 +20,15 @@ public partial class MainWindow : Window
     private bool _mpvStarting;
     private bool _feedLoading;
     private bool _fullscreen;
+    private WindowState _stateBeforeFullscreen = WindowState.Normal;
+    private Rect _boundsBeforeFullscreen;
     private bool _muted;
     private int _volume = 100;
     private double _aspect = 9.0 / 16.0;
 
     private readonly Stopwatch _switchTimer = new();
     private readonly List<string> _statusLines = new();
+    private CancellationTokenSource? _prefetchCts;
     private int _consecutiveFailures;
     private bool _lastFromCache;
 
@@ -209,17 +212,26 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 预取后 N 条的开头一段。串行执行——下一条最要紧，别让第二条抢带宽。
-    /// 每条只取 2MB，不是整条下载（实测有的视频 207MB，全下既慢又浪费）。
+    /// 每条只取 1MB，不是整条下载（实测有的视频 207MB，全下既慢又浪费）。
+    ///
+    /// 每次切换会取消上一轮预取：用户快速连按时，旧任务继续下只会挤占
+    /// 最新那条的带宽，反而更慢。
     /// </summary>
     private void PrefetchAhead(int index, int count)
     {
+        _prefetchCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _prefetchCts = cts;
+
         _ = Task.Run(async () =>
         {
             for (int k = 1; k <= count && index + k < _items.Count; k++)
             {
+                if (cts.IsCancellationRequested) return;
                 var next = _items[index + k];
                 if (!next.IsPlayable) continue;
-                try { await _proxy.PrefetchAsync(next); }
+                try { await _proxy.PrefetchAsync(next, cts.Token); }
+                catch (OperationCanceledException) { return; }
                 catch { /* 预取失败就等播放时透传 */ }
             }
         });
@@ -435,26 +447,71 @@ public partial class MainWindow : Window
     {
         _fullscreen = !_fullscreen;
 
+        // 只动可见性和窗口位置，不动 WindowStyle —— 改样式会让 WPF 重建窗口句柄，
+        // mpv 就画到旧句柄上去了，只能重启播放器（表现为黑屏重新缓冲）
+        TitleBar.Visibility = _fullscreen ? Visibility.Collapsed : Visibility.Visible;
+        SidePanel.Visibility = _fullscreen ? Visibility.Collapsed : Visibility.Visible;
+
         if (_fullscreen)
         {
-            SidePanel.Visibility = Visibility.Collapsed;
-            WindowStyle = WindowStyle.None;
-            ResizeMode = ResizeMode.NoResize;
-            WindowState = WindowState.Maximized;
+            _stateBeforeFullscreen = WindowState;
+            _boundsBeforeFullscreen = new Rect(Left, Top, Width, Height);
+
+            // WindowState=Maximized 只会铺到工作区，任务栏还露着。
+            // 无边框窗口直接铺到整块屏幕，才是真的全屏。
+            if (WindowState == WindowState.Maximized) WindowState = WindowState.Normal;
+            Left = 0;
+            Top = 0;
+            Width = SystemParameters.PrimaryScreenWidth;
+            Height = SystemParameters.PrimaryScreenHeight;
+            Topmost = true;
         }
         else
         {
-            WindowState = WindowState.Normal;
-            WindowStyle = WindowStyle.SingleBorderWindow;
-            ResizeMode = ResizeMode.CanResize;
-            SidePanel.Visibility = Visibility.Visible;
+            Topmost = false;
+            Left = _boundsBeforeFullscreen.Left;
+            Top = _boundsBeforeFullscreen.Top;
+            Width = _boundsBeforeFullscreen.Width;
+            Height = _boundsBeforeFullscreen.Height;
+            WindowState = _stateBeforeFullscreen;
         }
+
+        LayoutVideo();
+    }
+
+    // ================= 标题栏按钮 =================
+
+    private void OnMinimizeClick(object sender, RoutedEventArgs e)
+        => WindowState = WindowState.Minimized;
+
+    private void OnMaximizeClick(object sender, RoutedEventArgs e)
+    {
+        if (_fullscreen) { ToggleFullscreen(); return; }
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+    }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
+
+    private void OnWindowStateChanged(object? sender, EventArgs e)
+    {
+        MaxButton.Content = WindowState == WindowState.Maximized ? "❐" : "□";
+
+        // 无边框窗口最大化时，窗口比屏幕大一圈（留给 resize 热区），
+        // 不补这个边距内容边缘会被裁掉。全屏时不要边距，否则视频不铺满。
+        RootGrid.Margin = WindowState == WindowState.Maximized && !_fullscreen
+            ? new Thickness(8)
+            : new Thickness(0);
+
+        LayoutVideo();
     }
 
     // ================= 收尾 =================
 
     private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        _prefetchCts?.Cancel();
         try { await _proxy.DisposeAsync(); } catch { /* 收尾不抛 */ }
         if (_mpv is null) return;
 
