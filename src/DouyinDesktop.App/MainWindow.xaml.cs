@@ -98,6 +98,17 @@ public partial class MainWindow : Window
     [System.Runtime.InteropServices.DllImport("imm32.dll")]
     private static extern IntPtr ImmAssociateContext(IntPtr hWnd, IntPtr hImc);
 
+    /// <summary>
+    /// 每次窗口重新激活都断一次输入法。
+    /// 点过视频区（HwndHost 是独立 Win32 窗口）之后，输入法上下文会重新挂到主窗口上，
+    /// 结果按 G 弹出候选框、快捷键全部失效。
+    /// </summary>
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        ImmAssociateContext(new System.Windows.Interop.WindowInteropHelper(this).Handle, IntPtr.Zero);
+    }
+
     // ================= 启动 =================
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -397,6 +408,7 @@ public partial class MainWindow : Window
     private async Task SwitchFeedAsync(FeedContext target, string label)
     {
         _feed = target;
+        UpdateModeLabel();
 
         if (target.Items.Count > 0)
         {
@@ -542,28 +554,31 @@ public partial class MainWindow : Window
     private string CurrentId
         => _index >= 0 && _index < _items.Count ? _items[_index].Id : "";
 
-    private void OnTabDetailClick(object sender, RoutedEventArgs e)
-    {
-        AppLog.Write($"点击详情 Tab（当前评论可见={CommentsPane.Visibility}）");
-        SwitchTab(comments: false);
-    }
+    private enum SideTab { Detail, Comments, Profile }
 
-    private void OnTabCommentsClick(object sender, RoutedEventArgs e)
-    {
-        AppLog.Write($"点击评论 Tab（当前评论可见={CommentsPane.Visibility}）");
-        SwitchTab(comments: true);
-    }
+    private SideTab _sideTab = SideTab.Detail;
 
-    private void SwitchTab(bool comments)
-    {
-        AppLog.Write($"SwitchTab({comments})");
-        TabDetail.Tag = comments ? null : "active";
-        TabComments.Tag = comments ? "active" : null;
-        DetailPane.Visibility = comments ? Visibility.Collapsed : Visibility.Visible;
-        CommentsPane.Visibility = comments ? Visibility.Visible : Visibility.Collapsed;
+    private readonly Dictionary<string, IReadOnlyList<Aweme>> _profileCache = new();
+    private string _profileSecUid = "";
 
-        // 只在第一次切到评论页时拉，之后靠滚动加载更多
-        if (comments) _ = LoadCommentsAsync(reset: _commentAwemeId != CurrentId);
+    private void OnTabDetailClick(object sender, RoutedEventArgs e) => SwitchTab(SideTab.Detail);
+    private void OnTabCommentsClick(object sender, RoutedEventArgs e) => SwitchTab(SideTab.Comments);
+    private void OnTabProfileClick(object sender, RoutedEventArgs e) => SwitchTab(SideTab.Profile);
+
+    private void SwitchTab(SideTab tab)
+    {
+        _sideTab = tab;
+
+        TabDetail.Tag = tab == SideTab.Detail ? "active" : null;
+        TabComments.Tag = tab == SideTab.Comments ? "active" : null;
+        TabProfile.Tag = tab == SideTab.Profile ? "active" : null;
+
+        DetailPane.Visibility = tab == SideTab.Detail ? Visibility.Visible : Visibility.Collapsed;
+        CommentsPane.Visibility = tab == SideTab.Comments ? Visibility.Visible : Visibility.Collapsed;
+        ProfilePane.Visibility = tab == SideTab.Profile ? Visibility.Visible : Visibility.Collapsed;
+
+        if (tab == SideTab.Comments) _ = LoadCommentsAsync(reset: _commentAwemeId != CurrentId);
+        if (tab == SideTab.Profile) _ = LoadProfileAsync();
     }
 
     private async Task LoadCommentsAsync(bool reset)
@@ -617,6 +632,104 @@ public partial class MainWindow : Window
         if (e.ExtentHeight <= 0) return;
         if (e.VerticalOffset + e.ViewportHeight < e.ExtentHeight - 240) return;
         if (_commentsHasMore && !_commentsLoading) _ = LoadCommentsAsync(reset: false);
+    }
+
+    // ================= 作者主页 Tab =================
+
+    /// <summary>
+    /// 主页 Tab：作者的视频封面墙。只拉作品列表（含封面图 URL），不碰视频流。
+    /// </summary>
+    private async Task LoadProfileAsync()
+    {
+        if (_index < 0 || _index >= _items.Count) return;
+
+        var author = _items[_index].Author;
+        if (author is null || string.IsNullOrEmpty(author.SecUid))
+        {
+            ProfileName.Text = "拿不到作者信息";
+            ProfileGrid.ItemsSource = null;
+            return;
+        }
+
+        ProfileName.Text = "@" + author.Nickname;
+
+        // 同一个作者不重复拉
+        if (_profileSecUid == author.SecUid && ProfileGrid.ItemsSource is not null) return;
+
+        if (_profileCache.TryGetValue(author.SecUid, out var cached))
+        {
+            ShowProfile(author, cached);
+            return;
+        }
+
+        ProfileCount.Text = "加载中…";
+        var result = await _client.GetUserPostsAsync(author.SecUid);
+        if (!result.Success)
+        {
+            ProfileCount.Text = "";
+            ProfileHint.Text = "主页加载失败：" + result.Message;
+            ProfileHint.Visibility = Visibility.Visible;
+            return;
+        }
+
+        if (_profileCache.Count > 30) _profileCache.Clear();
+        _profileCache[author.SecUid] = result.Items;
+        ShowProfile(author, result.Items);
+    }
+
+    private void ShowProfile(Author author, IReadOnlyList<Aweme> posts)
+    {
+        _profileSecUid = author.SecUid ?? "";
+        ProfileGrid.ItemsSource = posts;
+        ProfileCount.Text = $"{posts.Count} 条作品 · 点封面直接播";
+        ProfileHint.Visibility = Visibility.Collapsed;
+
+        if (author.AvatarThumb?.First is { Length: > 0 } avatar)
+        {
+            try { ProfileAvatar.Source = new BitmapImage(new Uri(avatar)); }
+            catch (UriFormatException) { ProfileAvatar.Source = null; }
+        }
+        else
+        {
+            ProfileAvatar.Source = null;
+        }
+    }
+
+    private async void OnProfileItemClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Aweme item }) return;
+        if (ProfileGrid.ItemsSource is not IReadOnlyList<Aweme> posts) return;
+
+        int idx = posts.ToList().FindIndex(x => x.Id == item.Id);
+        if (idx < 0) return;
+
+        // 主页列表和当前流不是一回事：切到「作者主页」流里播
+        if (_items.IndexOf(item) < 0)
+        {
+            _authorMode = true;
+            _followMode = false;
+            _feed = _authorFeed;
+            _authorFeed.Items.Clear();
+            _authorFeed.Presented.Clear();
+            _authorFeed.Items.AddRange(posts);
+            _authorFeed.Index = idx;
+            UpdateModeLabel();
+        }
+
+        await PlayIndexAsync(idx, force: true);
+    }
+
+    /// <summary>右下角显示当前在哪个流。</summary>
+    private void UpdateModeLabel()
+    {
+        string text = _authorMode ? "作者主页" : _followMode ? "关注" : "推荐";
+        ModeLabel.Text = text;
+
+        // 非推荐流换个底色，一眼能看出来
+        ModeBadge.Background = new System.Windows.Media.SolidColorBrush(
+            _authorMode || _followMode
+                ? System.Windows.Media.Color.FromRgb(0x3A, 0x1D, 0x26)
+                : System.Windows.Media.Color.FromRgb(0x1F, 0x1F, 0x28));
     }
 
     private void OnToggleReplies(object sender, RoutedEventArgs e)
@@ -960,8 +1073,9 @@ public partial class MainWindow : Window
         LayoutVideo();
         UpdateIndexLabel();
 
-        // 正在看评论的话，切作品就换成新作品的评论
-        if (CommentsPane.Visibility == Visibility.Visible) _ = LoadCommentsAsync(reset: true);
+        // 正在看评论/主页的话，切作品就跟着换
+        if (_sideTab == SideTab.Comments) _ = LoadCommentsAsync(reset: true);
+        if (_sideTab == SideTab.Profile) _ = LoadProfileAsync();
     }
 
     private void UpdateTechStats(VideoStats s)
@@ -1081,6 +1195,9 @@ public partial class MainWindow : Window
 
                 case "refresh":
                     _authorMode = false;
+                    _followMode = false;
+                    _feed = _recommendFeed;
+                    UpdateModeLabel();
                     SetStatus("换一批…");
                     await LoadFeedAsync(reset: true);
                     break;
@@ -1098,7 +1215,12 @@ public partial class MainWindow : Window
                     break;
 
                 case "tab":
-                    SwitchTab(CommentsPane.Visibility != Visibility.Visible);
+                    SwitchTab(_sideTab switch
+                    {
+                        SideTab.Detail => SideTab.Comments,
+                        SideTab.Comments => SideTab.Profile,
+                        _ => SideTab.Detail,
+                    });
                     break;
 
                 case "login":

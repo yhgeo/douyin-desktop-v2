@@ -111,6 +111,8 @@
                                     Style="{StaticResource TabButton}" Click="OnTabDetailClick" />
                             <Button x:Name="TabComments" Content="评论"
                                     Style="{StaticResource TabButton}" Click="OnTabCommentsClick" />
+                            <Button x:Name="TabProfile" Content="主页"
+                                    Style="{StaticResource TabButton}" Click="OnTabProfileClick" />
                         </StackPanel>
                         <TextBlock x:Name="IndexLabel" Text="" HorizontalAlignment="Right"
                                    VerticalAlignment="Top" Margin="0,2,0,0"
@@ -277,12 +279,88 @@
                                    Style="{StaticResource Caption}" Visibility="Collapsed" />
                     </Grid>
 
+                    <!-- 主页：作者的视频封面墙（只加载封面图，不加载视频） -->
+                    <Grid x:Name="ProfilePane" Grid.Row="1" Visibility="Collapsed">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                    <Image x:Name="ProfileAvatar" Width="46" Height="46"
+                                           Stretch="UniformToFill" />
+                                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock x:Name="ProfileName" FontSize="15"
+                                                   FontWeight="SemiBold" />
+                                        <TextBlock x:Name="ProfileCount" Style="{StaticResource Caption}"
+                                                   Margin="0,3,0,0" />
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <ItemsControl x:Name="ProfileGrid">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Tag="{Binding}" Click="OnProfileItemClick"
+                                                    Cursor="Hand" Margin="0,0,8,8">
+                                                <Button.Template>
+                                                    <ControlTemplate TargetType="Button">
+                                                        <Border x:Name="Bd" Background="Transparent"
+                                                                CornerRadius="6" Padding="2">
+                                                            <ContentPresenter />
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="Bd" Property="Background"
+                                                                        Value="#22FFFFFF" />
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Button.Template>
+                                                <StackPanel Width="94">
+                                                    <Grid Height="125">
+                                                        <Border Background="#1A1A22" CornerRadius="5" />
+                                                        <Image Source="{Binding Video.CoverUrl}"
+                                                               Stretch="UniformToFill" />
+                                                        <Border VerticalAlignment="Bottom"
+                                                                HorizontalAlignment="Right"
+                                                                Background="#B0000000" CornerRadius="4"
+                                                                Padding="4,1" Margin="4">
+                                                            <TextBlock Text="{Binding DurationText}"
+                                                                       FontSize="10" Foreground="White" />
+                                                        </Border>
+                                                    </Grid>
+                                                    <TextBlock Text="{Binding LikeShortText}" FontSize="11"
+                                                               Foreground="#7A7A88" Margin="2,5,0,0"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <TextBlock x:Name="ProfileHint" Style="{StaticResource Caption}"
+                                           Text="点封面直接播这条" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
                     <!-- 底部：进度 + 状态 -->
                     <StackPanel Grid.Row="2" Margin="0,20,0,0">
                         <ProgressBar x:Name="Progress" Style="{StaticResource ThinProgress}"
                                      Minimum="0" Maximum="1" Value="0" />
-                        <TextBlock x:Name="StatusText" Style="{StaticResource Caption}"
-                                   Text="准备中…" Margin="0,12,0,0" TextWrapping="Wrap" />
+                        <DockPanel Margin="0,12,0,0">
+                            <Border x:Name="ModeBadge" DockPanel.Dock="Right"
+                                    Background="#1F1F28" CornerRadius="9"
+                                    Padding="9,3" VerticalAlignment="Top" Margin="10,0,0,0">
+                                <TextBlock x:Name="ModeLabel" Text="推荐" FontSize="11"
+                                           Foreground="#A8A8B4" />
+                            </Border>
+                            <TextBlock x:Name="StatusText" Style="{StaticResource Caption}"
+                                       Text="准备中…" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </DockPanel>
                     </StackPanel>
                 </Grid>
             </Border>

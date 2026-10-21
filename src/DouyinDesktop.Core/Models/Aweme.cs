@@ -32,6 +32,18 @@ public sealed class Aweme
     [JsonIgnore] public DateTimeOffset CreatedLocal =>
         DateTimeOffset.FromUnixTimeSeconds(CreateTime).ToLocalTime();
 
+    /// <summary>主页封面墙上的点赞数（"♥ 3.6万"）。</summary>
+    [JsonIgnore]
+    public string LikeShortText
+        => Statistics is null ? "" : "♥ " + FormatCount(Statistics.DiggCount);
+
+    public static string FormatCount(long n) => n switch
+    {
+        >= 100_000_000 => (n / 100_000_000.0).ToString("0.#") + "亿",
+        >= 10_000 => (n / 10_000.0).ToString("0.#") + "万",
+        _ => n.ToString(),
+    };
+
     [JsonIgnore] public string DurationText
     {
         get
