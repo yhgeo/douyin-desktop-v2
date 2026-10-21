@@ -243,6 +243,93 @@ public sealed class DouyinClient : IDisposable
         return list;
     }
 
+    // ================= 首页 tab 流（实验） =================
+
+    /// <summary>
+    /// 网页版首页"推荐"tab 用的接口。module/feed 实测只推视频（58 条 0 图集），
+    /// 试试这个能不能拿到图文。
+    /// </summary>
+    public async Task<FeedResult> GetTabFeedAsync(int count = 20, CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+        string bv = _profile.BrowserVersion;
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("tag_id", ""),
+            new("count", count.ToString()),
+            new("refresh_index", "1"),
+            new("refer_id", ""),
+            new("refer_type", "10"),
+            new("awemePcRecRawData", "{\"is_client\":false}"),
+            new("Seo-Flag", "0"),
+            new("install_time", _profile.InstallTime),
+            new("pc_client_type", "1"),
+            new("update_version_code", "170400"),
+            new("version_code", "170400"),
+            new("version_name", "17.4.0"),
+            new("cookie_enabled", "true"),
+            new("screen_width", _profile.ScreenWidth.ToString()),
+            new("screen_height", _profile.ScreenHeight.ToString()),
+            new("browser_language", "zh-CN"),
+            new("browser_platform", "Win32"),
+            new("browser_name", "Chrome"),
+            new("browser_version", bv),
+            new("browser_online", "true"),
+            new("engine_name", "Blink"),
+            new("engine_version", bv),
+            new("os_name", "Windows"),
+            new("os_version", "10"),
+            new("cpu_core_num", _profile.CpuCores.ToString()),
+            new("device_memory", _profile.DeviceMemory.ToString()),
+            new("platform", "PC"),
+            new("downlink", "10"),
+            new("effective_type", "4g"),
+            new("round_trip_time", "100"),
+            new("webid", _profile.WebId),
+            new("msToken", session.MsToken),
+        };
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+        string url = $"https://www.douyin.com/aweme/v1/web/tab/feed/?{query}" +
+                     $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        AddBrowserHeaders(req, session);
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            sw.Stop();
+
+            if (!resp.IsSuccessStatusCode)
+                return FeedResult.Fail($"HTTP {(int)resp.StatusCode}", sw.ElapsedMilliseconds);
+
+            // tab 流的响应是 aweme_list（对象数组），不是推荐流的 cards[].aweme 字符串
+            var items = ParseAwemeList(body);
+            if (items.Count == 0)
+            {
+                string snippet = body.Length > 200 ? body[..200].Replace('\n', ' ') + "…" : body;
+                return FeedResult.Fail($"tab 流没有内容：{snippet}", sw.ElapsedMilliseconds);
+            }
+
+            Log?.Invoke($"tab 流 {items.Count} 条 / {sw.ElapsedMilliseconds}ms");
+            return new FeedResult(items, true, "", sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            sw.Stop();
+            return FeedResult.Fail(ex.Message, sw.ElapsedMilliseconds);
+        }
+    }
+
     // ================= 评论 =================
 
     /// <summary>
@@ -302,6 +389,62 @@ public sealed class DouyinClient : IDisposable
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
             Log?.Invoke("评论请求失败：" + ex.Message);
+            return CommentPage.Empty;
+        }
+    }
+
+    /// <summary>拉某条评论下的回复。</summary>
+    public async Task<CommentPage> GetCommentRepliesAsync(
+        string awemeId, string commentId, long cursor = 0, int count = 20, CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("item_id", awemeId),
+            new("comment_id", commentId),
+            new("cursor", cursor.ToString()),
+            new("count", count.ToString()),
+            new("item_type", "0"),
+            new("whale_cut_token", ""),
+            new("cut_version", "1"),
+            new("rcFT", ""),
+        };
+        ps.AddRange(_profile.PlatformParams());
+        ps.Add(new("webid", _profile.WebId));
+        ps.Add(new("msToken", session.MsToken));
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+        string url = $"https://www.douyin.com/aweme/v1/web/comment/list/reply/?{query}" +
+                     $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        AddBrowserHeaders(req, session);
+        req.Headers.Remove("Referer");
+        req.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/video/{awemeId}");
+
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                Log?.Invoke($"回复 HTTP {(int)resp.StatusCode}");
+                return CommentPage.Empty;
+            }
+
+            var page = ParseComments(body, cursor, count);
+            Log?.Invoke($"回复 {page.Comments.Count} 条");
+            return page;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            Log?.Invoke("回复请求失败：" + ex.Message);
             return CommentPage.Empty;
         }
     }

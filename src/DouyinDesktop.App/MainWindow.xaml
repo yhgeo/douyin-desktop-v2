@@ -43,11 +43,11 @@
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                         WindowChrome.IsHitTestVisibleInChrome="True">
-                <Button x:Name="LoginButton" Content="登录" Width="64" Height="38"
+                <Button Content="设置" Width="56" Height="38"
                         Style="{StaticResource CaptionButton}"
                         FontFamily="Microsoft YaHei UI" FontSize="12"
-                        ToolTip="扫码登录（L）"
-                        Click="OnLoginClick" />
+                        ToolTip="设置快捷键与账号"
+                        Click="OnSettingsClick" />
 
                 <Button Style="{StaticResource CaptionButton}" ToolTip="最小化" Click="OnMinimizeClick">
                     <Path Style="{StaticResource CaptionIcon}" Data="M0,5 L10,5" />
@@ -157,8 +157,8 @@
                                 <TextBlock x:Name="TechFps" Grid.Row="0" Grid.Column="3" Text="—"
                                            Style="{StaticResource Caption}" Foreground="#C8C8D2" />
 
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="解码" Style="{StaticResource Caption}" />
-                                <TextBlock x:Name="TechHwdec" Grid.Row="1" Grid.Column="1" Text="—"
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="码率" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="TechBitrate" Grid.Row="1" Grid.Column="1" Text="—"
                                            Style="{StaticResource Caption}" Foreground="#C8C8D2" />
                             </Grid>
 
@@ -223,18 +223,53 @@
                             <ItemsControl x:Name="CommentList">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <StackPanel Margin="0,0,0,16">
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding Nickname}" FontSize="12"
-                                                           Foreground="#9A9AA6" />
-                                                <TextBlock Text="{Binding MetaText}" FontSize="11"
-                                                           Foreground="#5A5A66" Margin="8,0,0,0" />
+                                        <Border BorderBrush="#1F1F28" BorderThickness="0,0,0,1"
+                                                Margin="0,0,0,14" Padding="0,0,0,14">
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Nickname}" FontSize="12"
+                                                               Foreground="#9A9AA6" />
+                                                    <TextBlock Text="{Binding MetaText}" FontSize="11"
+                                                               Foreground="#5A5A66" Margin="8,0,0,0" />
+                                                </StackPanel>
+
+                                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                                           FontSize="13" LineHeight="21" Margin="0,5,0,0" />
+
+                                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                                    <TextBlock Text="{Binding LikeText}" FontSize="11"
+                                                               Foreground="#5A5A66" Margin="0,0,14,0" />
+                                                    <Button Content="{Binding ExpandText}" Tag="{Binding}"
+                                                            Click="OnToggleReplies"
+                                                            Visibility="{Binding ExpandVisibility}"
+                                                            Style="{StaticResource LinkButton}" />
+                                                </StackPanel>
+
+                                                <!-- 回复：缩进 + 左侧竖线，和官方一样展开在原评论下面 -->
+                                                <Border BorderBrush="#2A2A36" BorderThickness="2,0,0,0"
+                                                        Margin="6,10,0,0" Padding="12,2,0,0"
+                                                        Visibility="{Binding RepliesVisibility}">
+                                                    <ItemsControl ItemsSource="{Binding Replies}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <StackPanel Margin="0,0,0,10">
+                                                                    <StackPanel Orientation="Horizontal">
+                                                                        <TextBlock Text="{Binding Nickname}"
+                                                                                   FontSize="11" Foreground="#8A8A98" />
+                                                                        <TextBlock Text="{Binding MetaText}"
+                                                                                   FontSize="10" Foreground="#4A4A56"
+                                                                                   Margin="6,0,0,0" />
+                                                                    </StackPanel>
+                                                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                                                               FontSize="12" LineHeight="19"
+                                                                               Foreground="#D0D0DA" Margin="0,4,0,0" />
+                                                                </StackPanel>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </Border>
                                             </StackPanel>
-                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
-                                                       FontSize="13" LineHeight="21" Margin="0,5,0,0" />
-                                            <TextBlock Text="{Binding LikeText}" FontSize="11"
-                                                       Foreground="#5A5A66" Margin="0,5,0,0" />
-                                        </StackPanel>
+                                        </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>

@@ -19,6 +19,10 @@ public sealed class Comment
 
     [JsonIgnore] public string LikeText => DiggCount > 0 ? $"♥ {DiggCount}" : "";
 
+    [JsonIgnore] public bool HasReplies => ReplyCount > 0;
+
+    [JsonIgnore] public string ReplyText => ReplyCount > 0 ? $"展开 {ReplyCount} 条回复" : "";
+
     [JsonIgnore] public string TimeText
     {
         get

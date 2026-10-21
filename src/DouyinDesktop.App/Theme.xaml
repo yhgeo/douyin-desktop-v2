@@ -57,6 +57,39 @@
         字符图标在不同 DPI 下字重、基线都不一致，三个按钮看起来会歪。
         Path 统一画在 10×10 的框里，视觉中心天然对齐。
     -->
+    <!-- 纯文字按钮，用于"展开 N 条回复"这类次要操作 -->
+    <Style x:Key="LinkButton" TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="#7A8AA8" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <!-- 加 Padding + 透明背景，否则点击热区只有文字那么点大 -->
+                    <Border Background="Transparent" Padding="4,9">
+                        <TextBlock Text="{TemplateBinding Content}"
+                                   Foreground="{TemplateBinding Foreground}"
+                                   FontFamily="{TemplateBinding FontFamily}"
+                                   FontSize="{TemplateBinding FontSize}" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="#A8B8D0" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- 自绘标题栏按钮。图标用 Path 画而不是字符：
+         字符图标在不同 DPI 下字重、基线都不一致，三个按钮看起来会歪。 -->
     <Style x:Key="CaptionButton" TargetType="Button">
         <Setter Property="Width" Value="46" />
         <Setter Property="Height" Value="38" />
@@ -147,7 +180,7 @@
         像贴了一条铁皮。这里去掉箭头、收窄到 6px、滑块用圆角，hover 才变亮。
     -->
     <Style TargetType="ScrollBar">
-        <Setter Property="Width" Value="6" />
+        <Setter Property="Width" Value="4" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Template">
             <Setter.Value>

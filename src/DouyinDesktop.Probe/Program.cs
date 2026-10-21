@@ -127,6 +127,79 @@ if (args.Length > 0 && args[0] == "user")
     return 0;
 }
 
+// 推荐流参数实验：dotnet run --project src/DouyinDesktop.Probe -- feedtest
+// 目标：找到能让推荐流返回图集（aweme_type=68）的参数组合
+if (args.Length > 0 && args[0] == "feedtest")
+{
+    string[] modules = { "3003101", "3003100", "3003102", "" };
+
+    foreach (string moduleId in modules)
+    {
+        var profile = new DeviceProfile { ModuleId = moduleId };
+        using var c = DouyinClient.Create(profile);
+
+        var seen = new List<string>();
+        int total = 0, imageCount = 0;
+
+        for (int i = 0; i < 3; i++)
+        {
+            var r = await c.GetFeedAsync(20, seen);
+            if (!r.Success) { Console.WriteLine($"  module={moduleId} 失败：{r.Message}"); break; }
+            seen.AddRange(r.Items.Select(x => x.Id));
+            total += r.Items.Count;
+            imageCount += r.Items.Count(x => x.IsImagePost);
+        }
+
+        string label = string.IsNullOrEmpty(moduleId) ? "(不带)" : moduleId;
+        Console.WriteLine($"module_id={label,-8} 共 {total,3} 条  图集 {imageCount}");
+    }
+    return 0;
+}
+
+// 首页 tab 流实验：dotnet run --project src/DouyinDesktop.Probe -- tabtest
+if (args.Length > 0 && args[0] == "tabtest")
+{
+    using var ct2 = DouyinClient.Create();
+    ct2.Log += m => Console.WriteLine("    " + m);
+
+    int total = 0, imageCount = 0;
+    for (int i = 0; i < 3; i++)
+    {
+        var r = await ct2.GetTabFeedAsync(20);
+        if (!r.Success) { Console.WriteLine("失败：" + r.Message); break; }
+        total += r.Items.Count;
+        imageCount += r.Items.Count(x => x.IsImagePost);
+        string types = string.Join(",", r.Items.GroupBy(x => x.AwemeType).Select(g => $"{g.Key}×{g.Count()}"));
+        Console.WriteLine($"  第 {i + 1} 批 {r.Items.Count} 条  aweme_type: {types}");
+    }
+    Console.WriteLine($"\n共 {total} 条，图集 {imageCount}");
+    return 0;
+}
+
+// 评论回复接口验证：dotnet run --project src/DouyinDesktop.Probe -- replies
+if (args.Length > 0 && args[0] == "replies")
+{
+    using var cr = DouyinClient.Create();
+    cr.Log += m => Console.WriteLine("    " + m);
+
+    var f = await cr.GetFeedAsync(5);
+    var target = f.Items.FirstOrDefault(x => (x.Statistics?.CommentCount ?? 0) > 0);
+    if (target is null) { Console.WriteLine("没找到带评论的作品"); return 1; }
+
+    var page = await cr.GetCommentsAsync(target.Id);
+    var withReplies = page.Comments.FirstOrDefault(x => x.HasReplies);
+    if (withReplies is null) { Console.WriteLine("这批评论都没有回复"); return 1; }
+
+    Console.WriteLine($"评论「{withReplies.Text[..Math.Min(30, withReplies.Text.Length)]}」" +
+                      $"有 {withReplies.ReplyCount} 条回复\n");
+
+    var replies = await cr.GetCommentRepliesAsync(target.Id, withReplies.Id);
+    Console.WriteLine($"拿到 {replies.Comments.Count} 条回复 / hasMore={replies.HasMore}\n");
+    foreach (var r in replies.Comments.Take(6))
+        Console.WriteLine($"  {r.Nickname}: {r.Text}   [{r.MetaText}]");
+    return 0;
+}
+
 using var client = DouyinClient.Create();
 client.Log += msg => Console.WriteLine("    " + msg);
 

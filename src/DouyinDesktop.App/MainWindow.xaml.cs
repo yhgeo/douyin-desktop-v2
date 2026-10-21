@@ -14,8 +14,11 @@ public partial class MainWindow : Window
 {
     private readonly DouyinClient _client = DouyinClient.Create();
     private readonly VideoStreamProxy _proxy = VideoStreamProxy.Start();
+    private readonly KeyMap _keyMap = KeyMap.Load();
     private readonly List<Aweme> _items = new();
     private readonly HashSet<string> _presented = new();
+    /// <summary>已经混进列表的图集 id，避免重复插入。</summary>
+    private readonly HashSet<string> _injectedImages = new();
 
     // 图集：图片走单独的 HttpClient，缓存最近看过的几十张
     private readonly HttpClient _imageHttp = CreateImageHttp();
@@ -42,10 +45,12 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _prefetchCts;
     private int _consecutiveFailures;
     private bool _lastFromCache;
+    private long _apiBitrate;
 
     public MainWindow()
     {
         InitializeComponent();
+        CommentList.ItemsSource = _commentVms;
         _client.Log += msg => Dispatcher.BeginInvoke(() => PushStatus(msg));
         Surface.HandleCreated += OnSurfaceReady;
     }
@@ -72,6 +77,7 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        EnsureOnScreen();
         LayoutVideo();
         SetStatus("正在获取推荐…");
 
@@ -127,6 +133,21 @@ public partial class MainWindow : Window
         });
 
         PushStatus("已注入演示图集");
+    }
+
+    /// <summary>窗口位置存到屏幕外时（换显示器/分辨率变化）拉回中间。</summary>
+    private void EnsureOnScreen()
+    {
+        var wa = SystemParameters.WorkArea;
+        bool offscreen = Left + Width < wa.Left + 120
+                         || Left > wa.Right - 120
+                         || Top + Height < wa.Top + 60
+                         || Top > wa.Bottom - 60;
+
+        if (!offscreen) return;
+
+        Left = wa.Left + (wa.Width - Width) / 2;
+        Top = wa.Top + (wa.Height - Height) / 2;
     }
 
     private static string? FindProjectRoot()
@@ -228,7 +249,10 @@ public partial class MainWindow : Window
             }
 
             PushStatus($"推荐流 +{result.Items.Count} 条 / {result.ElapsedMs}ms");
-            UpdateLoginLabel();
+
+            // 推荐流接口不推图文（实测 58 条 0 条），后台从作者主页捞图集补进列表，
+            // 这样正常往下刷也能刷到图集
+            if (!_authorMode) _ = InjectImagesAsync(result.Items);
 
             if (_index < 0 && _items.Count > 0)
                 await PlayIndexAsync(0);
@@ -285,7 +309,6 @@ public partial class MainWindow : Window
 
         int imageCount = result.Items.Count(x => x.IsImagePost);
         AppLog.Write($"作者作品：{result.Items.Count} 条，其中图集 {imageCount} 条");
-        UpdateLoginLabel();
         await PlayIndexAsync(0);
         SetStatus($"@{nickname} 的 {result.Items.Count} 条作品" +
                   (imageCount > 0 ? $"（含 {imageCount} 条图集）" : "") +
@@ -368,6 +391,7 @@ public partial class MainWindow : Window
     private bool _commentsLoading;
     private bool _commentsHasMore;
     private string _commentAwemeId = "";
+    private readonly System.Collections.ObjectModel.ObservableCollection<CommentVm> _commentVms = new();
 
     private string CurrentId
         => _index >= 0 && _index < _items.Count ? _items[_index].Id : "";
@@ -406,7 +430,7 @@ public partial class MainWindow : Window
             _commentAwemeId = id;
             _commentCursor = 0;
             _commentsHasMore = true;
-            CommentList.Items.Clear();
+            _commentVms.Clear();
             CommentEmpty.Visibility = Visibility.Collapsed;
         }
         if (!_commentsHasMore) return;
@@ -419,13 +443,13 @@ public partial class MainWindow : Window
             // 加载期间用户可能已经切走了，别把上一条的评论塞进来
             if (id != CurrentId) return;
 
-            foreach (var c in page.Comments) CommentList.Items.Add(c);
+            foreach (var c in page.Comments) _commentVms.Add(new CommentVm(c));
             _commentCursor = page.Cursor;
             _commentsHasMore = page.HasMore;
 
             TabComments.Content = page.Total > 0 ? $"评论 {Count(page.Total)}" : "评论";
 
-            if (CommentList.Items.Count == 0)
+            if (_commentVms.Count == 0)
             {
                 CommentEmpty.Text = page.Total == 0 ? "暂无评论" : "评论加载失败（可能被风控）";
                 CommentEmpty.Visibility = Visibility.Visible;
@@ -447,6 +471,92 @@ public partial class MainWindow : Window
         if (e.ExtentHeight <= 0) return;
         if (e.VerticalOffset + e.ViewportHeight < e.ExtentHeight - 240) return;
         if (_commentsHasMore && !_commentsLoading) _ = LoadCommentsAsync(reset: false);
+    }
+
+    /// <summary>
+    /// 从推荐流里的作者主页捞图集，插进当前列表。
+    ///
+    /// 为什么这么做：PC web 的两个推荐接口（module/feed、tab/feed）都只返回视频，
+    /// 服务端层面就没有图文（实测 module/feed 58 条、tab/feed 6 条，aweme_type 全是 0）。
+    /// GitHub 上现成的项目也都是"按作品 ID 取图集"，没有能改推荐流内容的方案。
+    /// 所以只能自己补：刷推荐时也能遇到图集，体验上接近官方。
+    /// </summary>
+    private async Task InjectImagesAsync(IReadOnlyList<Aweme> source)
+    {
+        var authors = source
+            .Select(x => x.Author)
+            .Where(a => a is { SecUid.Length: > 0 })
+            .DistinctBy(a => a!.SecUid)
+            .Take(2)
+            .ToList();
+
+        foreach (var author in authors)
+        {
+            if (_authorMode) return;
+
+            try
+            {
+                var posts = await _client.GetUserPostsAsync(author!.SecUid);
+                if (!posts.Success) continue;
+
+                var image = posts.Items.FirstOrDefault(x => x.IsImagePost && _injectedImages.Add(x.Id));
+                if (image is null) continue;
+
+                // 插在当前条目后第 2 位：让用户"再刷一两条"就遇到，而不是立刻跳
+                int insertAt = Math.Min(Math.Max(_index, 0) + 2, _items.Count);
+                _items.Insert(insertAt, image);
+                AppLog.Write($"混入图集 {image.Id}（@{author.Nickname}）到第 {insertAt + 1} 条");
+                UpdateIndexLabel();
+                return;
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("混入图集失败：" + ex.Message);
+            }
+        }
+    }
+
+    private void OnToggleReplies(object sender, RoutedEventArgs e)
+    {
+        AppLog.Write($"点击展开回复 sender={sender?.GetType().Name}");
+
+        if (sender is not FrameworkElement { Tag: CommentVm vm })
+        {
+            AppLog.Write("  Tag 不是 CommentVm，绑定有问题");
+            return;
+        }
+
+        if (vm.IsExpanded)
+        {
+            vm.Collapse();
+            return;
+        }
+
+        _ = ExpandRepliesAsync(vm);
+    }
+
+    private async Task ExpandRepliesAsync(CommentVm vm)
+    {
+        string awemeId = CurrentId;
+        if (string.IsNullOrEmpty(awemeId)) return;
+
+        vm.SetLoading(true);
+        try
+        {
+            var page = await _client.GetCommentRepliesAsync(awemeId, vm.Model.Id);
+            if (page.Comments.Count == 0)
+            {
+                vm.SetLoading(false);
+                SetStatus("没有更多回复");
+                return;
+            }
+            vm.Expand(page.Comments);
+        }
+        catch (Exception ex)
+        {
+            vm.SetLoading(false);
+            SetStatus("加载回复失败：" + ex.Message);
+        }
     }
 
     // ================= 图集 =================
@@ -691,6 +801,16 @@ public partial class MainWindow : Window
             : "";
 
         ResetTechStats();
+        _apiBitrate = item.Video?.MaxBitRate ?? 0;
+        TechBitrate.Text = FormatBitrate(_apiBitrate);
+
+        // 评论数先用作品自带的统计值，点进评论页后再用接口返回的 total 校正
+        long commentTotal = item.Statistics?.CommentCount ?? 0;
+        TabComments.Content = commentTotal > 0 ? $"评论 {Count(commentTotal)}" : "评论";
+        _commentAwemeId = "";
+
+        // 换视频后回到顶部，否则长文案还停在上一条的滚动位置
+        DetailPane.ScrollToTop();
 
         // 图集用第一张图的宽高比，视频用视频的
         _aspect = item.IsImagePost && item.Images is { Count: > 0 } imgs
@@ -710,11 +830,19 @@ public partial class MainWindow : Window
     {
         TechRes.Text = s.ResolutionText;
         TechFps.Text = s.FpsText;
-        TechHwdec.Text = s.HwdecText;
+        // mpv 对网络流常常不报 video-bitrate，用接口给的档位码率兜底
+        TechBitrate.Text = s.BitrateBps > 0 ? s.BitrateText : FormatBitrate(_apiBitrate);
     }
 
     private void ResetTechStats()
-        => TechRes.Text = TechFps.Text = TechHwdec.Text = "—";
+        => TechRes.Text = TechFps.Text = TechBitrate.Text = "—";
+
+    private static string FormatBitrate(long bps) => bps switch
+    {
+        >= 1_000_000 => $"{bps / 1_000_000.0:0.##} Mbps",
+        > 0 => $"{bps / 1000.0:0} kbps",
+        _ => "—",
+    };
 
     private void UpdateIndexLabel()
         => IndexLabel.Text = _items.Count == 0 ? "" : $"{_index + 1} / {_items.Count}";
@@ -756,77 +884,76 @@ public partial class MainWindow : Window
     {
         try
         {
-            switch (e.Key)
+            // Esc 不进快捷键表：它只用来退出全屏
+            if (e.Key == Key.Escape)
             {
-                case Key.Down:
-                case Key.PageDown:
-                case Key.S:
+                if (_fullscreen) { ToggleFullscreen(); e.Handled = true; }
+                return;
+            }
+
+            // Ctrl+O 打开设置（不进快捷键表，避免和普通按键冲突）
+            if (e.Key == Key.O && Keyboard.Modifiers == ModifierKeys.Control)
+            {
+                OnSettingsClick(this, new RoutedEventArgs());
+                e.Handled = true;
+                return;
+            }
+
+            string? action = _keyMap.ActionFor(e.Key);
+            if (action is null) return;
+
+            e.Handled = true;
+
+            switch (action)
+            {
+                case "next":
                     await NextAsync();
-                    e.Handled = true;
                     break;
 
-                case Key.Up:
-                case Key.PageUp:
-                case Key.W:
+                case "prev":
                     await PrevAsync();
-                    e.Handled = true;
                     break;
 
-                case Key.Space:
+                case "pause":
                     if (_mpv is not null) await _mpv.TogglePauseAsync();
-                    e.Handled = true;
                     break;
 
-                case Key.Left:
-                case Key.A:
+                case "seekBack":
                     if (_imageMode) { await StepImageAsync(-1); break; }
                     if (_mpv is not null)
                         await _mpv.SeekAsync(Math.Max(0, _mpv.Position - 5));
-                    e.Handled = true;
                     break;
 
-                case Key.Right:
-                case Key.D:
+                case "seekForward":
                     if (_imageMode) { await StepImageAsync(1); break; }
                     if (_mpv is not null)
                         await _mpv.SeekAsync(Math.Min(_mpv.Duration, _mpv.Position + 5));
-                    e.Handled = true;
                     break;
 
-                case Key.M:
+                case "mute":
                     await ToggleMuteAsync();
-                    e.Handled = true;
                     break;
 
-                case Key.F:
+                case "fullscreen":
                     ToggleFullscreen();
-                    e.Handled = true;
                     break;
 
-                case Key.Escape:
-                    if (_fullscreen) { ToggleFullscreen(); e.Handled = true; }
-                    break;
-
-                case Key.R:
+                case "refresh":
                     _authorMode = false;
                     SetStatus("换一批…");
                     await LoadFeedAsync(reset: true);
-                    e.Handled = true;
                     break;
 
-                case Key.U:
+                case "author":
                     await LoadCurrentAuthorAsync();
-                    e.Handled = true;
                     break;
 
-                case Key.Tab:
+                case "tab":
                     SwitchTab(CommentsPane.Visibility != Visibility.Visible);
-                    e.Handled = true;
                     break;
 
-                case Key.L:
-                    OnLoginClick(this, new RoutedEventArgs());
-                    e.Handled = true;
+                case "login":
+                    await HandleLoginAsync();
                     break;
             }
         }
@@ -902,7 +1029,17 @@ public partial class MainWindow : Window
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
-    private async void OnLoginClick(object sender, RoutedEventArgs e)
+    private void OnSettingsClick(object sender, RoutedEventArgs e)
+    {
+        var win = new SettingsWindow(_keyMap, _client, HandleLoginAsync, HandleLogout)
+        {
+            Owner = this,
+        };
+        win.ShowDialog();
+    }
+
+    /// <summary>扫码登录。返回是否真的登上了（取消或失败返回 false）。</summary>
+    private async Task<bool> HandleLoginAsync()
     {
         var win = new LoginWindow { Owner = this };
         win.ShowDialog();
@@ -910,20 +1047,27 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(win.Cookies))
         {
             SetStatus("已取消登录");
-            return;
+            return false;
         }
 
         var session = await _client.EnsureSessionAsync();
         session.LoginCookies = win.Cookies;
         session.Save();
 
-        UpdateLoginLabel();
         SetStatus("登录成功，正在刷新推荐…");
         await LoadFeedAsync(reset: true);
+        return true;
     }
 
-    private void UpdateLoginLabel()
-        => LoginButton.Content = _client.Session?.IsLoggedIn == true ? "已登录" : "登录";
+    private void HandleLogout()
+    {
+        var session = _client.Session;
+        if (session is null) return;
+
+        session.LoginCookies = "";
+        session.Save();
+        SetStatus("已退出登录");
+    }
 
     private void OnWindowStateChanged(object? sender, EventArgs e)
     {

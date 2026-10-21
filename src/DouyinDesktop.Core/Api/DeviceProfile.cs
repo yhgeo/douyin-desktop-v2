@@ -17,6 +17,12 @@ public sealed class DeviceProfile
     public string WebId { get; init; } = RandomDigits(19);
     public string InstallTime { get; init; } = "1715480185";
 
+    /// <summary>
+    /// 推荐流的 module_id。3003101 是默认"推荐"。
+    /// 传空字符串表示不带这个参数（用于实验：确认它是否过滤了图文）。
+    /// </summary>
+    public string ModuleId { get; init; } = "3003101";
+
     public const string DefaultUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
@@ -81,13 +87,21 @@ public sealed class DeviceProfile
         int count, string presentedIds, string msToken, int refreshIndex)
     {
         string bv = BrowserVersion;
-        return new List<KeyValuePair<string, string>>
+
+        var ps = new List<KeyValuePair<string, string>>
         {
             new("device_platform", "webapp"),
             new("aid", "6383"),
             new("channel", "channel_pc_web"),
-            new("module_id", "3003101"),
-            new("count", count.ToString()),
+        };
+
+        // 实验用：ModuleId 为空时整个参数都不发
+        if (!string.IsNullOrEmpty(ModuleId))
+            ps.Add(new("module_id", ModuleId));
+
+        ps.AddRange(new[]
+        {
+            new KeyValuePair<string, string>("count", count.ToString()),
             new("filterGids", ""),
             new("presented_ids", presentedIds),
             new("refresh_index", refreshIndex.ToString()),
@@ -120,6 +134,8 @@ public sealed class DeviceProfile
             new("round_trip_time", "100"),
             new("webid", WebId),
             new("msToken", msToken),
-        };
+        });
+
+        return ps;
     }
 }
