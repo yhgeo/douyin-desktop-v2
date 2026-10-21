@@ -218,6 +218,8 @@ if (args.Length > 0 && args[0] == "scroll")
         string types = string.Join(",", r.Items.GroupBy(x => x.AwemeType)
             .Select(g => $"{g.Key}×{g.Count()}"));
         Console.WriteLine($"  第 {i + 1} 批 {r.Items.Count} 条  aweme_type: {types}");
+        foreach (var x in r.Items.Take(2))
+            Console.WriteLine($"     ip_label='{x.IpLabel}'  @{x.AuthorName}");
 
         foreach (var img in r.Items.Where(x => x.IsImagePost))
             Console.WriteLine($"    图集 {img.Id}  {img.Images!.Count} 张  {img.Desc[..Math.Min(24, img.Desc.Length)]}");

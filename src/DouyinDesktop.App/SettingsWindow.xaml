@@ -100,7 +100,7 @@
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="140" />
-                                            <ColumnDefinition Width="64" />
+                                            <ColumnDefinition Width="112" />
                                         </Grid.ColumnDefinitions>
 
                                         <StackPanel VerticalAlignment="Center">
@@ -113,9 +113,15 @@
                                                    VerticalAlignment="Center" FontSize="13"
                                                    Foreground="#C8C8D2" />
 
-                                        <Button Grid.Column="2" Content="修改" Tag="{Binding}"
-                                                Style="{StaticResource LinkButton}"
-                                                VerticalAlignment="Center" Click="OnRebindClick" />
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal"
+                                                    VerticalAlignment="Center">
+                                            <Button Content="修改" Tag="{Binding}"
+                                                    Style="{StaticResource LinkButton}"
+                                                    Click="OnRebindClick" />
+                                            <Button Content="清除" Tag="{Binding}"
+                                                    Style="{StaticResource LinkButton}"
+                                                    Margin="14,0,0,0" Click="OnClearClick" />
+                                        </StackPanel>
                                     </Grid>
                                 </Border>
                             </DataTemplate>

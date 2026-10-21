@@ -35,6 +35,10 @@ public partial class MainWindow : Window
     private bool _fullscreen;
     private WindowState _stateBeforeFullscreen = WindowState.Normal;
     private Rect _boundsBeforeFullscreen;
+    /// <summary>自己维护的最大化状态（不用 WindowState.Maximized，见 ToggleMaximize）。</summary>
+    private bool _maximized;
+    private Rect _boundsBeforeMaximize;
+    private bool _adjustingState;
     /// <summary>当前列表是不是某个作者的作品（此时不再自动补推荐流，否则会混在一起）。</summary>
     private bool _authorMode;
     private bool _muted;
@@ -83,6 +87,7 @@ public partial class MainWindow : Window
         SetStatus("正在获取推荐…");
 
         InjectDemoImageIfRequested();
+        RefreshShortcuts();
 
         // 调试用：--author=<sec_uid> 直接打开某个作者的作品列表
         string? authorArg = Environment.GetCommandLineArgs()
@@ -298,6 +303,13 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task<IReadOnlyList<Aweme>> FetchImagesOnlyAsync()
     {
+        // 实测游客态几乎刷不到图集（IP 属地也不返回），登录后才正常
+        if (_client.Session?.IsLoggedIn != true)
+        {
+            SetStatus("只看图集需要先登录：游客态下抖音基本不推图文");
+            return Array.Empty<Aweme>();
+        }
+
         var images = new List<Aweme>();
         var seen = new HashSet<string>();
 
@@ -821,6 +833,12 @@ public partial class MainWindow : Window
     private void ShowInfo(Aweme item)
     {
         AuthorText.Text = "@" + item.AuthorName;
+
+        var metaParts = new List<string>();
+        if (!string.IsNullOrEmpty(item.IpLabel)) metaParts.Add(item.IpLabel);
+        if (item.CreateTime > 0) metaParts.Add(item.CreatedLocal.ToString("yyyy-MM-dd HH:mm"));
+        MetaLine.Text = string.Join(" · ", metaParts);
+        MetaLine.Visibility = metaParts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         DescText.Text = string.IsNullOrWhiteSpace(item.Desc) ? "（无文案）" : item.Desc;
 
         var st = item.Statistics;
@@ -1073,9 +1091,47 @@ public partial class MainWindow : Window
     private void OnMaximizeClick(object sender, RoutedEventArgs e)
     {
         if (_fullscreen) { ToggleFullscreen(); return; }
-        WindowState = WindowState == WindowState.Maximized
-            ? WindowState.Normal
-            : WindowState.Maximized;
+        ToggleMaximize();
+    }
+
+    /// <summary>
+    /// 自己实现最大化：不用 WindowState.Maximized。
+    ///
+    /// 因为 WindowChrome 的 Maximized 是按**屏幕**尺寸算的（2560×1440），
+    /// 不是工作区（2560×1400），底部 48px 会盖在任务栏下面，
+    /// 而且 MaxHeight 对它无效。直接设 Left/Top/Width/Height 到工作区最省事。
+    /// </summary>
+    private void ToggleMaximize()
+    {
+        if (!_maximized)
+        {
+            _boundsBeforeMaximize = new Rect(Left, Top, Width, Height);
+            _maximized = true;
+
+            var wa = SystemParameters.WorkArea;
+            Left = wa.Left;
+            Top = wa.Top;
+            Width = wa.Width;
+            Height = wa.Height;
+        }
+        else
+        {
+            _maximized = false;
+            Left = _boundsBeforeMaximize.Left;
+            Top = _boundsBeforeMaximize.Top;
+            Width = _boundsBeforeMaximize.Width;
+            Height = _boundsBeforeMaximize.Height;
+        }
+
+        UpdateMaxIcon();
+        LayoutVideo();
+    }
+
+    private void UpdateMaxIcon()
+    {
+        MaxIcon.Data = System.Windows.Media.Geometry.Parse(_maximized
+            ? "M2.5,0.5 L9.5,0.5 L9.5,7.5 M0.5,2.5 L7.5,2.5 L7.5,9.5"
+            : "M0.5,0.5 L9.5,0.5 L9.5,9.5 L0.5,9.5 Z");
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
@@ -1087,6 +1143,23 @@ public partial class MainWindow : Window
             Owner = this,
         };
         win.ShowDialog();
+
+        // 设置里可能改了/取消了快捷键，回来要刷新详情页那张表
+        RefreshShortcuts();
+    }
+
+    /// <summary>
+    /// 详情页的快捷键提示：只显示当前真正有绑定的，取消掉的自动隐藏。
+    /// </summary>
+    private void RefreshShortcuts()
+    {
+        var rows = KeyMap.Actions
+            .Select(def => new { def, key = _keyMap.Get(def.Id) })
+            .Where(x => x.key != Key.None)
+            .Select(x => new { Key = KeyMap.KeyText(x.key), Action = x.def.Label })
+            .ToList();
+
+        ShortcutList.ItemsSource = rows;
     }
 
     /// <summary>扫码登录。返回是否真的登上了（取消或失败返回 false）。</summary>
@@ -1122,17 +1195,19 @@ public partial class MainWindow : Window
 
     private void OnWindowStateChanged(object? sender, EventArgs e)
     {
-        bool maximized = WindowState == WindowState.Maximized;
-        // 最大化时换成"还原"图标（两个叠起来的方框）
-        MaxIcon.Data = System.Windows.Media.Geometry.Parse(maximized
-            ? "M2.5,0.5 L9.5,0.5 L9.5,7.5 M0.5,2.5 L7.5,2.5 L7.5,9.5"
-            : "M0.5,0.5 L9.5,0.5 L9.5,9.5 L0.5,9.5 Z");
+        if (_adjustingState) return;
 
-        // 无边框窗口最大化时，窗口比屏幕大一圈（留给 resize 热区），
-        // 不补这个边距内容边缘会被裁掉。全屏时不要边距，否则视频不铺满。
-        RootGrid.Margin = maximized && !_fullscreen
-            ? new Thickness(8)
-            : new Thickness(0);
+        // 双击标题栏时 WindowChrome 会把窗口设成 Maximized（会盖住任务栏），
+        // 拦下来转成自定义最大化
+        if (WindowState == WindowState.Maximized)
+        {
+            _adjustingState = true;
+            WindowState = WindowState.Normal;
+            _adjustingState = false;
+
+            if (!_maximized) ToggleMaximize();
+            return;
+        }
 
         LayoutVideo();
     }

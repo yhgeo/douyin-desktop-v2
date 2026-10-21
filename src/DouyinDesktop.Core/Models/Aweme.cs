@@ -11,6 +11,8 @@ public sealed class Aweme
     [JsonPropertyName("aweme_id")] public string Id { get; init; } = "";
     [JsonPropertyName("desc")] public string Desc { get; init; } = "";
     [JsonPropertyName("create_time")] public long CreateTime { get; init; }
+    /// <summary>发布地（"广东""北京"这种），服务端按 IP 判断。</summary>
+    [JsonPropertyName("ip_label")] public string IpLabel { get; init; } = "";
     /// <summary>0=视频，68=图文（图集）。诊断用，界面不显示。</summary>
     [JsonPropertyName("aweme_type")] public int AwemeType { get; init; }
     [JsonPropertyName("author")] public Author? Author { get; init; }

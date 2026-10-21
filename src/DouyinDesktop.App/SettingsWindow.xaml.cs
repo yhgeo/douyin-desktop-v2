@@ -164,6 +164,16 @@ public partial class SettingsWindow : Window
         HintText.Text = $"「{row.Label}」已改为 {KeyMap.KeyText(e.Key)}";
     }
 
+    private void OnClearClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: KeyRow row }) return;
+
+        // Key.None 表示不绑定：ActionFor 永远匹配不到，等于这个功能没有快捷键
+        _map.Set(row.ActionId, Key.None);
+        foreach (var r in _rows) r.Refresh();
+        HintText.Text = $"「{row.Label}」已取消绑定（方向键 / WASD 别名仍可用）";
+    }
+
     private void OnResetClick(object sender, RoutedEventArgs e)
     {
         _map.ResetAll();
