@@ -34,7 +34,38 @@ public partial class SettingsWindow : Window
         foreach (var def in KeyMap.Actions) _rows.Add(new KeyRow(_map, def));
         KeyList.ItemsSource = _rows;
 
+        DataPathText.Text = DouyinDesktop.Core.DouyinPaths.DataDirectory;
         RefreshAccount();
+    }
+
+    // ================= 左侧导航 =================
+
+    private void OnNavAccount(object sender, RoutedEventArgs e) => SwitchPage("account");
+    private void OnNavKeys(object sender, RoutedEventArgs e) => SwitchPage("keys");
+    private void OnNavAbout(object sender, RoutedEventArgs e) => SwitchPage("about");
+
+    private void SwitchPage(string page)
+    {
+        NavAccount.Tag = page == "account" ? "active" : null;
+        NavKeys.Tag = page == "keys" ? "active" : null;
+        NavAbout.Tag = page == "about" ? "active" : null;
+
+        PageAccount.Visibility = page == "account" ? Visibility.Visible : Visibility.Collapsed;
+        PageKeys.Visibility = page == "keys" ? Visibility.Visible : Visibility.Collapsed;
+        PageAbout.Visibility = page == "about" ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnOpenDataDir(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start("explorer.exe",
+                DouyinDesktop.Core.DouyinPaths.DataDirectory);
+        }
+        catch (Exception ex)
+        {
+            HintText.Text = "打不开：" + ex.Message;
+        }
     }
 
     private void RefreshAccount()
