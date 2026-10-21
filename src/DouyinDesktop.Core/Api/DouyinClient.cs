@@ -185,13 +185,24 @@ public sealed class DouyinClient : IDisposable
             }
         }
 
-        // Set-Cookie 里会下发 UIFID 之类，后续请求带上更稳；只记日志，暂不参与请求
+        // Set-Cookie 里会下发 UIFID（webSign 签名要用），抓下来存住
         if (resp.Headers.TryGetValues("Set-Cookie", out var cookies))
         {
             foreach (string c in cookies)
             {
-                int eq = c.IndexOf('=');
-                if (eq > 0) Log?.Invoke("Set-Cookie: " + c[..Math.Min(eq, 40)] + "…");
+                int idx = c.IndexOf("UIFID=", StringComparison.Ordinal);
+                if (idx < 0) continue;
+
+                string tail = c[(idx + 6)..];
+                int semi = tail.IndexOf(';');
+                string value = semi > 0 ? tail[..semi] : tail;
+
+                if (value.Length > 10 && value != session.Uifid)
+                {
+                    session.Uifid = value;
+                    session.Save();
+                    Log?.Invoke($"拿到 UIFID（{value.Length} 字符）");
+                }
             }
         }
     }
@@ -323,6 +334,144 @@ public sealed class DouyinClient : IDisposable
             : 0;
 
         return new CommentPage(list, hasMore, next, total);
+    }
+
+    // ================= 用户作品 =================
+
+    /// <summary>
+    /// 拉某个作者的作品列表。
+    ///
+    /// 图集作品只能从这里拿到——推荐流（module/feed）实测扫 48 条，
+    /// images 字段一条都没有，全是视频。要看图集必须走作者主页。
+    /// </summary>
+    public async Task<FeedResult> GetUserPostsAsync(
+        string secUid, long maxCursor = 0, int count = 20, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(secUid)) return FeedResult.Fail("缺少 sec_uid");
+
+        var session = await EnsureSessionAsync(ct: ct);
+        string bv = _profile.BrowserVersion;
+
+        // 参数顺序照 2026-08-16 的抓包（46 项）。
+        // 这个接口和推荐流不是一套参数：version_code 是 290100 / 29.1.0，
+        // 还多出 publish_video_strategy_type、from_user_page、support_dash 这些。
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("sec_user_id", secUid),
+            new("max_cursor", maxCursor.ToString()),
+            new("locate_query", "false"),
+            new("show_live_replay_strategy", "1"),
+            new("need_time_list", maxCursor == 0 ? "1" : "0"),
+            new("time_list_query", "0"),
+            new("whale_cut_token", ""),
+            new("cut_version", "1"),
+            new("count", count.ToString()),
+            new("publish_video_strategy_type", "2"),
+            new("from_user_page", "1"),   // 0=自己主页，1=他人主页
+            new("update_version_code", "170400"),
+            new("pc_client_type", "1"),
+            new("pc_libra_divert", "Windows"),
+            new("support_h265", "1"),
+            new("support_dash", "1"),
+            new("cpu_core_num", _profile.CpuCores.ToString()),
+            new("version_code", "290100"),
+            new("version_name", "29.1.0"),
+            new("cookie_enabled", "true"),
+            new("screen_width", _profile.ScreenWidth.ToString()),
+            new("screen_height", _profile.ScreenHeight.ToString()),
+            new("browser_language", "zh-CN"),
+            new("browser_platform", "Win32"),
+            new("browser_name", "Chrome"),
+            new("browser_version", bv),
+            new("browser_online", "true"),
+            new("engine_name", "Blink"),
+            new("engine_version", bv),
+            new("os_name", "Windows"),
+            new("os_version", "10"),
+            new("device_memory", _profile.DeviceMemory.ToString()),
+            new("platform", "PC"),
+            new("downlink", "10"),
+            new("effective_type", "4g"),
+            new("round_trip_time", "0"),
+        };
+
+        string uifid = session.EffectiveUifid;
+        ps.Add(new("webid", _profile.WebId));
+        if (!string.IsNullOrEmpty(uifid)) ps.Add(new("uifid", uifid));
+        ps.Add(new("msToken", session.MsToken));
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+
+        // a_bogus 是对不含自己的 query 算的，算完再拼进去；
+        // verifyFp/fp 在这个接口里位于 a_bogus 之后（推荐流在之前）
+        query += $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                 $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+
+        // 作者主页在 secsdk 的 webSign 策略表里，整条 query 还要再签一次
+        string url = WebSign.SignUrl(
+            "https://www.douyin.com/aweme/v1/web/aweme/post/", query, uifid);
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        AddBrowserHeaders(req, session);
+        req.Headers.Remove("Referer");
+        req.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/user/{secUid}");
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            sw.Stop();
+
+            if (!resp.IsSuccessStatusCode)
+                return FeedResult.Fail($"HTTP {(int)resp.StatusCode}", sw.ElapsedMilliseconds);
+
+            var items = ParseAwemeList(body);
+            if (items.Count == 0)
+            {
+                string snippet = body.Length > 160 ? body[..160].Replace('\n', ' ') + "…" : body;
+                return FeedResult.Fail($"没有作品：{snippet}", sw.ElapsedMilliseconds);
+            }
+
+            Log?.Invoke($"用户作品 {items.Count} 条 / {sw.ElapsedMilliseconds}ms");
+            return new FeedResult(items, true, "", sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            sw.Stop();
+            return FeedResult.Fail(ex.Message, sw.ElapsedMilliseconds);
+        }
+    }
+
+    /// <summary>
+    /// 用户主页的 aweme_list 是**对象数组**（不像推荐流是 cards[].aweme 字符串），
+    /// 直接反序列化就行。数组里可能有 null 占位，跳过。
+    /// </summary>
+    private static List<Aweme> ParseAwemeList(string json)
+    {
+        var list = new List<Aweme>();
+        if (string.IsNullOrWhiteSpace(json) || json.TrimStart()[0] != '{') return list;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("aweme_list", out var arr)
+                || arr.ValueKind != JsonValueKind.Array)
+                return list;
+
+            foreach (var a in arr.EnumerateArray())
+            {
+                if (a.ValueKind != JsonValueKind.Object) continue;
+                var item = a.Deserialize<Aweme>(JsonOptions);
+                if (item is not null && !string.IsNullOrEmpty(item.Id)) list.Add(item);
+            }
+        }
+        catch (JsonException) { }
+        return list;
     }
 
     // ================= 播放 =================

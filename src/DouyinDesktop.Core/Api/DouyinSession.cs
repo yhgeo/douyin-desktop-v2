@@ -25,6 +25,30 @@ public sealed class DouyinSession
     /// </summary>
     public string LoginCookies { get; set; } = "";
 
+    /// <summary>
+    /// 服务端在 Set-Cookie 里下发的 UIFID，webSign 签名要用。
+    /// 登录 Cookie 里通常只有 UIFID_TEMP，正式的要等第一次请求后才有。
+    /// </summary>
+    public string Uifid { get; set; } = "";
+
+    [JsonIgnore]
+    public string EffectiveUifid
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(Uifid)) return Uifid;
+
+            // 兜底：从登录 Cookie 里翻一遍
+            foreach (string part in LoginCookies.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string kv = part.Trim();
+                if (kv.StartsWith("UIFID=", StringComparison.Ordinal))
+                    return kv[6..];
+            }
+            return "";
+        }
+    }
+
     [JsonIgnore] public bool IsLoggedIn => !string.IsNullOrEmpty(LoginCookies);
 
     [JsonIgnore] public bool IsComplete => !string.IsNullOrEmpty(Ttwid) && !string.IsNullOrEmpty(SvWebId);

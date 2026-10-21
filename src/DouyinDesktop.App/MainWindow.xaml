@@ -43,14 +43,25 @@
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                         WindowChrome.IsHitTestVisibleInChrome="True">
-                <Button x:Name="LoginButton" Content="登录" Width="64"
+                <Button x:Name="LoginButton" Content="登录" Width="64" Height="38"
                         Style="{StaticResource CaptionButton}"
                         FontFamily="Microsoft YaHei UI" FontSize="12"
+                        ToolTip="扫码登录（L）"
                         Click="OnLoginClick" />
-                <Button Content="—" Style="{StaticResource CaptionButton}" Click="OnMinimizeClick" />
-                <Button x:Name="MaxButton" Content="□" Style="{StaticResource CaptionButton}"
-                        Click="OnMaximizeClick" />
-                <Button Content="✕" Style="{StaticResource CloseButton}" Click="OnCloseClick" />
+
+                <Button Style="{StaticResource CaptionButton}" ToolTip="最小化" Click="OnMinimizeClick">
+                    <Path Style="{StaticResource CaptionIcon}" Data="M0,5 L10,5" />
+                </Button>
+
+                <Button x:Name="MaxButton" Style="{StaticResource CaptionButton}"
+                        ToolTip="最大化" Click="OnMaximizeClick">
+                    <Path x:Name="MaxIcon" Style="{StaticResource CaptionIcon}"
+                          Data="M0.5,0.5 L9.5,0.5 L9.5,9.5 L0.5,9.5 Z" />
+                </Button>
+
+                <Button Style="{StaticResource CloseButton}" ToolTip="关闭" Click="OnCloseClick">
+                    <Path Style="{StaticResource CaptionIcon}" Data="M0.5,0.5 L9.5,9.5 M9.5,0.5 L0.5,9.5" />
+                </Button>
             </StackPanel>
 
             <Border Height="1" VerticalAlignment="Bottom" Background="{StaticResource LineBrush}" />
@@ -72,8 +83,10 @@
                 <Grid x:Name="ImageLayer" Visibility="Collapsed" Background="Black">
                     <Image x:Name="ImageView" Stretch="Uniform" />
 
-                    <Border HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                            Margin="0,0,0,26" Background="#B0000000" CornerRadius="12" Padding="12,5">
+                    <!-- 页码放右上角，避免和图片底部的内容打架 -->
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Margin="0,18,18,0" Panel.ZIndex="10"
+                            Background="#A6000000" CornerRadius="13" Padding="12,5">
                         <TextBlock x:Name="ImageIndexText" Text="1 / 1"
                                    FontSize="12" Foreground="White" />
                     </Border>
@@ -124,15 +137,14 @@
                                        TextWrapping="Wrap" Margin="0,0,0,4" />
 
                             <!-- 技术参数：来自 mpv 的实时属性，不是接口返回值 -->
-                            <Grid Margin="0,16,0,0">
+                            <Grid Margin="0,14,0,0">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="56" />
+                                    <ColumnDefinition Width="54" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="46" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="21" />
-                                    <RowDefinition Height="21" />
-                                    <RowDefinition Height="21" />
                                     <RowDefinition Height="21" />
                                     <RowDefinition Height="21" />
                                 </Grid.RowDefinitions>
@@ -141,21 +153,12 @@
                                 <TextBlock x:Name="TechRes" Grid.Row="0" Grid.Column="1" Text="—"
                                            Style="{StaticResource Caption}" Foreground="#C8C8D2" />
 
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="帧率" Style="{StaticResource Caption}" />
-                                <TextBlock x:Name="TechFps" Grid.Row="1" Grid.Column="1" Text="—"
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="帧率" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="TechFps" Grid.Row="0" Grid.Column="3" Text="—"
                                            Style="{StaticResource Caption}" Foreground="#C8C8D2" />
 
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="码率" Style="{StaticResource Caption}" />
-                                <TextBlock x:Name="TechBitrate" Grid.Row="2" Grid.Column="1" Text="—"
-                                           Style="{StaticResource Caption}" Foreground="#C8C8D2" />
-
-                                <TextBlock Grid.Row="3" Grid.Column="0" Text="编码" Style="{StaticResource Caption}" />
-                                <TextBlock x:Name="TechCodec" Grid.Row="3" Grid.Column="1" Text="—"
-                                           Style="{StaticResource Caption}" Foreground="#C8C8D2"
-                                           TextTrimming="CharacterEllipsis" />
-
-                                <TextBlock Grid.Row="4" Grid.Column="0" Text="解码" Style="{StaticResource Caption}" />
-                                <TextBlock x:Name="TechHwdec" Grid.Row="4" Grid.Column="1" Text="—"
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="解码" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="TechHwdec" Grid.Row="1" Grid.Column="1" Text="—"
                                            Style="{StaticResource Caption}" Foreground="#C8C8D2" />
                             </Grid>
 
@@ -165,12 +168,13 @@
                                        Text="0:00 / 0:00" Margin="0,0,0,18" />
 
                             <!-- 快捷键 -->
-                            <Grid Margin="0,0,0,0">
+                            <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="76" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
+                                    <RowDefinition Height="26" />
                                     <RowDefinition Height="26" />
                                     <RowDefinition Height="26" />
                                     <RowDefinition Height="26" />
@@ -204,6 +208,9 @@
 
                                 <TextBlock Grid.Row="7" Grid.Column="0" Text="Tab" Style="{StaticResource Caption}" />
                                 <TextBlock Grid.Row="7" Grid.Column="1" Text="详情 / 评论" Style="{StaticResource Caption}" />
+
+                                <TextBlock Grid.Row="8" Grid.Column="0" Text="U" Style="{StaticResource Caption}" />
+                                <TextBlock Grid.Row="8" Grid.Column="1" Text="看这个作者的全部作品" Style="{StaticResource Caption}" />
                             </Grid>
                         </StackPanel>
                     </ScrollViewer>

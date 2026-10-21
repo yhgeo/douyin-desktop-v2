@@ -59,6 +59,74 @@ if (args.Length > 0 && args[0] == "images")
     return 0;
 }
 
+// 作者主页作品（图集的唯一来源）：dotnet run --project src/DouyinDesktop.Probe -- user [sec_uid]
+if (args.Length > 0 && args[0] == "user")
+{
+    using var cu = DouyinClient.Create();
+    cu.Log += m => Console.WriteLine("    " + m);
+
+    // 指定了 sec_uid 就只查这一个，并打印每条作品的序号和类型
+    if (args.Length > 1)
+    {
+        var one = await cu.GetUserPostsAsync(args[1]);
+        if (!one.Success) { Console.WriteLine("失败：" + one.Message); return 1; }
+
+        Console.WriteLine($"作品 {one.Items.Count} 条\n");
+        for (int i = 0; i < one.Items.Count; i++)
+        {
+            var p = one.Items[i];
+            string kind = p.IsImagePost ? $"图集 {p.Images!.Count} 张" : "视频";
+            string desc = p.Desc.Length > 26 ? p.Desc[..26] : p.Desc;
+            Console.WriteLine($"  #{i + 1,2}  {kind,-10}  {desc}");
+        }
+        return 0;
+    }
+
+    var authors = new Dictionary<string, string>();   // sec_uid -> nickname
+    for (int round = 0; round < 3 && authors.Count < 6; round++)
+    {
+        var f = await cu.GetFeedAsync(10);
+        if (!f.Success) continue;
+        foreach (var a in f.Items)
+        {
+            var au = a.Author;
+            if (au is null || string.IsNullOrEmpty(au.SecUid)) continue;
+            authors.TryAdd(au.SecUid, au.Nickname);
+            if (authors.Count >= 6) break;
+        }
+    }
+
+    Console.WriteLine($"准备查 {authors.Count} 个作者的主页\n");
+
+    int totalImages = 0;
+    foreach (var (secUid, nickname) in authors)
+    {
+        var posts = await cu.GetUserPostsAsync(secUid);
+        if (!posts.Success)
+        {
+            Console.WriteLine($"@{nickname,-14} 失败：{posts.Message}");
+            continue;
+        }
+
+        int imageCount = posts.Items.Count(x => x.IsImagePost);
+        totalImages += imageCount;
+        string types = string.Join(",", posts.Items.GroupBy(x => x.AwemeType)
+            .Select(g => $"{g.Key}×{g.Count()}"));
+        Console.WriteLine($"@{nickname,-14} 作品 {posts.Items.Count,2} 条  图集 {imageCount}  " +
+                          $"aweme_type: {types}  sec_uid={secUid}");
+
+        foreach (var p in posts.Items.Where(x => x.IsImagePost).Take(3))
+        {
+            string desc = p.Desc.Length > 24 ? p.Desc[..24] : p.Desc;
+            Console.WriteLine($"    图集 {p.Id}  {p.Images!.Count} 张  {desc}");
+            Console.WriteLine($"         首图 {p.Images[0].Url[..Math.Min(70, p.Images[0].Url.Length)]}");
+        }
+    }
+
+    Console.WriteLine($"\n合计图集 {totalImages} 条");
+    return 0;
+}
+
 using var client = DouyinClient.Create();
 client.Log += msg => Console.WriteLine("    " + msg);
 

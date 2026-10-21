@@ -31,6 +31,8 @@ public partial class MainWindow : Window
     private bool _fullscreen;
     private WindowState _stateBeforeFullscreen = WindowState.Normal;
     private Rect _boundsBeforeFullscreen;
+    /// <summary>当前列表是不是某个作者的作品（此时不再自动补推荐流，否则会混在一起）。</summary>
+    private bool _authorMode;
     private bool _muted;
     private int _volume = 100;
     private double _aspect = 9.0 / 16.0;
@@ -40,7 +42,6 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _prefetchCts;
     private int _consecutiveFailures;
     private bool _lastFromCache;
-    private long _apiBitrate;
 
     public MainWindow()
     {
@@ -75,6 +76,15 @@ public partial class MainWindow : Window
         SetStatus("正在获取推荐…");
 
         InjectDemoImageIfRequested();
+
+        // 调试用：--author=<sec_uid> 直接打开某个作者的作品列表
+        string? authorArg = Environment.GetCommandLineArgs()
+            .FirstOrDefault(a => a.StartsWith("--author=", StringComparison.Ordinal));
+        if (authorArg is not null)
+        {
+            _ = LoadAuthorPostsAsync(authorArg["--author=".Length..], "指定作者");
+            return;
+        }
 
         // 播放器和推荐流并行准备：谁先好都不等谁
         _ = LoadFeedAsync();
@@ -205,7 +215,7 @@ public partial class MainWindow : Window
             }
 
             SetStatus("正在获取推荐…");
-            var result = await _client.GetFeedAsync(10, _presented);
+            var result = await _client.GetFeedAsync(15, _presented);
             if (!result.Success)
             {
                 SetStatus("获取失败：" + result.Message);
@@ -235,12 +245,58 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>缓冲区快见底时补货，避免播到第 9 条才开始等网络。</summary>
+    /// <summary>
+    /// 缓冲区快见底时补货。
+    /// 留 6 条的余量而不是 3 条：拉一批要 2 秒多，余量太小的话
+    /// 用户切到末尾时会干等，表现为"播到第 11 个又要重新加载"。
+    /// </summary>
     private void EnsureBuffer()
     {
-        if (_feedLoading) return;
-        if (_items.Count - _index <= 3)
+        // 作者主页模式下不补推荐流——混进来就不是"这个人的作品"了
+        if (_feedLoading || _authorMode) return;
+        if (_items.Count - _index <= 6)
             _ = LoadFeedAsync();
+    }
+
+    /// <summary>
+    /// 加载指定 sec_uid 的全部作品。
+    /// 这是图集的唯一入口——推荐流几乎不推图文（实测 48 条里 0 条）。
+    /// </summary>
+    private async Task LoadAuthorPostsAsync(string secUid, string nickname)
+    {
+        if (string.IsNullOrEmpty(secUid))
+        {
+            SetStatus("拿不到作者信息");
+            return;
+        }
+
+        SetStatus($"正在加载 @{nickname} 的作品…");
+        var result = await _client.GetUserPostsAsync(secUid);
+        if (!result.Success)
+        {
+            SetStatus("加载失败：" + result.Message);
+            return;
+        }
+
+        _authorMode = true;
+        _items.Clear();
+        _items.AddRange(result.Items);
+        _index = -1;
+
+        int imageCount = result.Items.Count(x => x.IsImagePost);
+        AppLog.Write($"作者作品：{result.Items.Count} 条，其中图集 {imageCount} 条");
+        UpdateLoginLabel();
+        await PlayIndexAsync(0);
+        SetStatus($"@{nickname} 的 {result.Items.Count} 条作品" +
+                  (imageCount > 0 ? $"（含 {imageCount} 条图集）" : "") +
+                  "，按 R 回推荐");
+    }
+
+    private Task LoadCurrentAuthorAsync()
+    {
+        if (_index < 0 || _index >= _items.Count) return Task.CompletedTask;
+        var author = _items[_index].Author;
+        return LoadAuthorPostsAsync(author?.SecUid ?? "", author?.Nickname ?? "作者");
     }
 
     // ================= 播放 =================
@@ -258,7 +314,7 @@ public partial class MainWindow : Window
             ShowInfo(item);
             await ShowImagePostAsync(item);
             UpdateIndexLabel();
-            PrefetchAhead(index, 2);
+            PrefetchAround(index);
             EnsureBuffer();
             return;
         }
@@ -301,7 +357,7 @@ public partial class MainWindow : Window
         }
 
         _lastFromCache = _proxy.HasPrefetch(item.Id);
-        PrefetchAhead(index, 2);
+        PrefetchAround(index);
         UpdateIndexLabel();
         EnsureBuffer();
     }
@@ -316,12 +372,21 @@ public partial class MainWindow : Window
     private string CurrentId
         => _index >= 0 && _index < _items.Count ? _items[_index].Id : "";
 
-    private void OnTabDetailClick(object sender, RoutedEventArgs e) => SwitchTab(comments: false);
+    private void OnTabDetailClick(object sender, RoutedEventArgs e)
+    {
+        AppLog.Write($"点击详情 Tab（当前评论可见={CommentsPane.Visibility}）");
+        SwitchTab(comments: false);
+    }
 
-    private void OnTabCommentsClick(object sender, RoutedEventArgs e) => SwitchTab(comments: true);
+    private void OnTabCommentsClick(object sender, RoutedEventArgs e)
+    {
+        AppLog.Write($"点击评论 Tab（当前评论可见={CommentsPane.Visibility}）");
+        SwitchTab(comments: true);
+    }
 
     private void SwitchTab(bool comments)
     {
+        AppLog.Write($"SwitchTab({comments})");
         TabDetail.Tag = comments ? null : "active";
         TabComments.Tag = comments ? "active" : null;
         DetailPane.Visibility = comments ? Visibility.Collapsed : Visibility.Visible;
@@ -404,6 +469,8 @@ public partial class MainWindow : Window
         _imageMode = true;
         _imageItem = item;
         _imageIndex = 0;
+
+        AppLog.Write($"图集作品 {item.Id}：{item.Images?.Count ?? 0} 张");
 
         // HwndHost 永远盖在 WPF 内容之上，必须先把它藏起来，图片才看得见
         Surface.Visibility = Visibility.Collapsed;
@@ -502,13 +569,13 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 预取后 N 条的开头一段。串行执行——下一条最要紧，别让第二条抢带宽。
-    /// 每条只取 1MB，不是整条下载（实测有的视频 207MB，全下既慢又浪费）。
+    /// 以当前视频为中心，预取前后各两条的开头一段。
     ///
-    /// 每次切换会取消上一轮预取：用户快速连按时，旧任务继续下只会挤占
-    /// 最新那条的带宽，反而更慢。
+    /// 顺序就是优先级：+1 最要紧（马上要切），然后 -1（回退），再 +2/-2。
+    /// 每次切换取消上一轮——用户快速连按时，旧任务继续下只会挤占最新那条的带宽。
+    /// 每条只取 1MB，不是整条下载（实测有的视频 207MB，全下既慢又浪费）。
     /// </summary>
-    private void PrefetchAhead(int index, int count)
+    private void PrefetchAround(int index)
     {
         _prefetchCts?.Cancel();
         var cts = new CancellationTokenSource();
@@ -516,11 +583,16 @@ public partial class MainWindow : Window
 
         _ = Task.Run(async () =>
         {
-            for (int k = 1; k <= count && index + k < _items.Count; k++)
+            foreach (int offset in new[] { 1, -1, 2, -2 })
             {
                 if (cts.IsCancellationRequested) return;
-                var next = _items[index + k];
+
+                int i = index + offset;
+                if (i < 0 || i >= _items.Count) continue;
+
+                var next = _items[i];
                 if (!next.IsPlayable) continue;
+
                 try { await _proxy.PrefetchAsync(next, cts.Token); }
                 catch (OperationCanceledException) { return; }
                 catch { /* 预取失败就等播放时透传 */ }
@@ -617,8 +689,6 @@ public partial class MainWindow : Window
             : "";
 
         ResetTechStats();
-        _apiBitrate = item.Video?.MaxBitRate ?? 0;
-        TechBitrate.Text = FormatBitrate(_apiBitrate);
 
         // 图集用第一张图的宽高比，视频用视频的
         _aspect = item.IsImagePost && item.Images is { Count: > 0 } imgs
@@ -638,23 +708,11 @@ public partial class MainWindow : Window
     {
         TechRes.Text = s.ResolutionText;
         TechFps.Text = s.FpsText;
-        // mpv 对网络流常常不报 video-bitrate，用接口给的档位码率兜底
-        TechBitrate.Text = s.BitrateBps > 0 ? s.BitrateText : FormatBitrate(_apiBitrate);
-        TechCodec.Text = s.CodecText;
         TechHwdec.Text = s.HwdecText;
     }
 
-    private static string FormatBitrate(long bps) => bps switch
-    {
-        >= 1_000_000 => $"{bps / 1_000_000.0:0.##} Mbps",
-        > 0 => $"{bps / 1000.0:0} kbps",
-        _ => "—",
-    };
-
     private void ResetTechStats()
-    {
-        TechRes.Text = TechFps.Text = TechBitrate.Text = TechCodec.Text = TechHwdec.Text = "—";
-    }
+        => TechRes.Text = TechFps.Text = TechHwdec.Text = "—";
 
     private void UpdateIndexLabel()
         => IndexLabel.Text = _items.Count == 0 ? "" : $"{_index + 1} / {_items.Count}";
@@ -748,8 +806,14 @@ public partial class MainWindow : Window
                     break;
 
                 case Key.R:
+                    _authorMode = false;
                     SetStatus("换一批…");
                     await LoadFeedAsync(reset: true);
+                    e.Handled = true;
+                    break;
+
+                case Key.U:
+                    await LoadCurrentAuthorAsync();
                     e.Handled = true;
                     break;
 
@@ -861,11 +925,15 @@ public partial class MainWindow : Window
 
     private void OnWindowStateChanged(object? sender, EventArgs e)
     {
-        MaxButton.Content = WindowState == WindowState.Maximized ? "❐" : "□";
+        bool maximized = WindowState == WindowState.Maximized;
+        // 最大化时换成"还原"图标（两个叠起来的方框）
+        MaxIcon.Data = System.Windows.Media.Geometry.Parse(maximized
+            ? "M2.5,0.5 L9.5,0.5 L9.5,7.5 M0.5,2.5 L7.5,2.5 L7.5,9.5"
+            : "M0.5,0.5 L9.5,0.5 L9.5,9.5 L0.5,9.5 Z");
 
         // 无边框窗口最大化时，窗口比屏幕大一圈（留给 resize 热区），
         // 不补这个边距内容边缘会被裁掉。全屏时不要边距，否则视频不铺满。
-        RootGrid.Margin = WindowState == WindowState.Maximized && !_fullscreen
+        RootGrid.Margin = maximized && !_fullscreen
             ? new Thickness(8)
             : new Thickness(0);
 

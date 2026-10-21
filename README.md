@@ -36,7 +36,7 @@ dotnet run --project DouyinDesktop.App
 > "You must install or update .NET"——因为 .NET 10 装在用户目录、没进系统 PATH。
 > 请用上面的 `env.ps1` 方式启动，或者在系统环境变量里设置 `DOTNET_ROOT=C:\Users\<你>\.dotnet`。
 
-**操作**：↑↓ 切换、空格暂停、←→ 快退快进 5 秒、M 静音、F 全屏、R 换一批、L 登录。
+**操作**：↑↓/WS 切换、空格暂停、←→/AD 快进或图集翻页、M 静音、F 全屏、Tab 详情/评论、U 看作者主页、R 换一批、L 登录。
 
 ---
 
@@ -72,7 +72,8 @@ douyin-desktop-v2/
 - [x] 播放器：mpv 嵌入窗口 + IPC 控制 + 开头段预取
 - [x] 界面：竖屏视频 + 作者/标题/统计 + 键盘与滚轮
 - [x] 扫码登录：WebView2 跑官方登录页，抓 Cookie 复用
-- [ ] 图集作品展示（目前会跳过）
+- [x] 评论区：一级评论 + 滚动加载更多
+- [x] 图集作品：从作者主页加载（推荐流不推图文），webSign 签名已移植
 
 ---
 

@@ -11,6 +11,8 @@ public sealed class Aweme
     [JsonPropertyName("aweme_id")] public string Id { get; init; } = "";
     [JsonPropertyName("desc")] public string Desc { get; init; } = "";
     [JsonPropertyName("create_time")] public long CreateTime { get; init; }
+    /// <summary>0=视频，68=图文（图集）。诊断用，界面不显示。</summary>
+    [JsonPropertyName("aweme_type")] public int AwemeType { get; init; }
     [JsonPropertyName("author")] public Author? Author { get; init; }
     [JsonPropertyName("statistics")] public Statistics? Statistics { get; init; }
     [JsonPropertyName("video")] public VideoInfo? Video { get; init; }
