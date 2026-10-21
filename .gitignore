@@ -1,0 +1,21 @@
+# 项目运行时（体积大、可重建，不进版本库）
+/env/
+/vendor/
+/assets/mpv/
+
+# .NET 构建产物
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+.vs/
+
+# 运行日志与缓存
+/logs/
+*.log
+/tmp/
+
+# 系统垃圾
+Thumbs.db
+desktop.ini
+.DS_Store
