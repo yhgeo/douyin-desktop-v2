@@ -19,3 +19,6 @@
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# 工具内部目录（不对外）
+/.workbuddy-ai/
