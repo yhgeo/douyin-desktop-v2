@@ -196,7 +196,7 @@
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="字号" FontSize="12" Foreground="#8C8C99"
                                                VerticalAlignment="Center" />
-                                    <Slider x:Name="FontSlider" Grid.Column="1" Minimum="2" Maximum="6"
+                                    <Slider x:Name="FontSlider" Grid.Column="1" Minimum="1" Maximum="6"
                                             TickFrequency="0.1" IsSnapToTickEnabled="True"
                                             Style="{StaticResource DarkSlider}"
                                             ValueChanged="OnDanmakuStyleChanged" />

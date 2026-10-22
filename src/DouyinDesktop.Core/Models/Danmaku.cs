@@ -95,7 +95,7 @@ public static class DanmakuAss
         int playH = Math.Max(h, baseH);
         int playW = (int)Math.Round((double)playH * w / h);
 
-        double fontPct = Math.Clamp(style.FontPercent, 1.5, 8.0);
+        double fontPct = Math.Clamp(style.FontPercent, 0.8, 8.0);
         int fontSize = Math.Max(12, (int)Math.Round(playH * fontPct / 100.0));
 
         double outlineRatio = Math.Clamp(style.OutlineRatio, 0, 0.3);

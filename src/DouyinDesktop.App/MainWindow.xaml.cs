@@ -209,11 +209,26 @@ public partial class MainWindow : Window
 
         int idx = Math.Clamp(snap.Index, 0, snap.Items.Count - 1);
         var item = snap.Items[idx];
-        string uri = item.Video?.PlayAddr?.Uri ?? "";
-        if (uri.Length == 0) return false;
+
+        _items.Clear();
+        _presented.Clear();
+        foreach (var a in snap.Items)
+            if (_presented.Add(a.Id)) _items.Add(a);
+        if (_items.Count == 0) return false;
+
+        int saved = _items.FindIndex(x => x.Id == item.Id);
+        if (saved < 0) saved = 0;
+
+        // 上次那条已经看过了，往后挪一条——不然每次打开都是同一个视频，
+        // 看着就像"预加载坏了"。挪到末尾就停在末尾。
+        int start = saved + 1 < _items.Count ? saved + 1 : saved;
+
+        var play = _items[start];
+        string playUri = play.Video?.PlayAddr?.Uri ?? "";
+        if (playUri.Length == 0) return false;
 
         SetStatus("接着上次继续…");
-        var probe = await _client.ProbeStreamAsync(uri);
+        var probe = await _client.ProbeStreamAsync(playUri);
         if (!probe.Ok)
         {
             AppLog.Write($"上次的播放地址已失效（{probe.Detail}），重新拉推荐");
@@ -221,16 +236,10 @@ public partial class MainWindow : Window
             return false;
         }
 
-        _items.Clear();
-        _presented.Clear();
-        foreach (var a in snap.Items)
-            if (_presented.Add(a.Id)) _items.Add(a);
-
-        _index = _items.FindIndex(x => x.Id == item.Id);
-        if (_index < 0) _index = 0;
-
+        _index = start;
         _restoredSession = true;
-        AppLog.Write($"接着上次：{_items.Count} 条，第 {_index + 1} 条，探活 {probe.ElapsedMs}ms");
+        AppLog.Write($"接着上次：{_items.Count} 条，从第 {start + 1} 条开始（上次第 {saved + 1} 条），" +
+                     $"探活 {probe.ElapsedMs}ms");
 
         await PlayIndexAsync(_index, force: true);
         return true;
@@ -660,6 +669,7 @@ public partial class MainWindow : Window
             _danmakuAssPath = null;
             if (old >= 0) await RemoveSubtitleQuietlyAsync(old);
 
+            _overlay.SetVideoSize(item.Video?.Width ?? 0, item.Video?.Height ?? 0);
             _overlay.SetStyle(style);
             _overlay.SetItems(_danmakuItems.Values);
             AppLog.Write($"弹幕浮层：{_danmakuItems.Count} 条 / 区域 {_settings.DanmakuArea}");

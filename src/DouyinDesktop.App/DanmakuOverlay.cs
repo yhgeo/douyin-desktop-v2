@@ -243,9 +243,38 @@ public sealed class DanmakuOverlay : Window
 
     // ================= 布局 =================
 
-    private double DanmakuFontSize => Math.Max(10, _target.ActualHeight * Math.Clamp(_style.FontPercent, 1.5, 8.0) / 100.0);
+    private double DanmakuFontSize => Math.Max(8, VideoRect().Height * Math.Clamp(_style.FontPercent, 0.8, 8.0) / 100.0);
 
     private double LaneHeight => DanmakuFontSize * 1.7;
+
+    private int _videoW;
+    private int _videoH;
+
+    /// <summary>换视频时告诉浮层这条视频的原始分辨率，用来算 letterbox 后的实际画面高度。</summary>
+    public void SetVideoSize(int width, int height)
+    {
+        if (width == _videoW && height == _videoH) return;
+        _videoW = width;
+        _videoH = height;
+        Reload();
+        SyncBounds();
+    }
+
+    /// <summary>
+    /// 视频在视频区里**实际**占的那块（去掉上下黑边）。
+    ///
+    /// 字号必须按这个高度算，不能按视频区高度：窗口模式视频区窄，全屏时高，
+    /// 按视频区算的话同一档字号在两种模式下看着不一样大。
+    /// </summary>
+    private (double Top, double Height) VideoRect()
+    {
+        double w = _target.ActualWidth, h = _target.ActualHeight;
+        if (_videoW <= 0 || _videoH <= 0) return (0, h);
+
+        double aspect = (double)_videoW / _videoH;
+        double vh = w / h > aspect ? h : w / aspect;
+        return ((h - vh) / 2, vh);
+    }
 
     /// <summary>区域占视频高度的比例区间。</summary>
     private (double Top, double Bottom) Area()
@@ -266,8 +295,8 @@ public sealed class DanmakuOverlay : Window
     private (double Top, double Height) Band()
     {
         var (t, b) = Area();
-        double h = _target.ActualHeight;
-        return (h * t, Math.Max(LaneHeight, h * (b - t)));
+        var (videoTop, videoHeight) = VideoRect();
+        return (videoTop + videoHeight * t, Math.Max(LaneHeight, videoHeight * (b - t)));
     }
 
     private int LaneCount()
@@ -324,9 +353,10 @@ public sealed class DanmakuOverlay : Window
 
     private void SyncBounds()
     {
-        // 主窗口最小化、或者不是活动窗口时（比如打开了设置对话框、切到别的程序）
-        // 就藏起来。不藏的话全屏时浮层是 topmost，会盖在设置窗口上面。
-        if (_owner.WindowState == WindowState.Minimized || !_owner.IsActive)
+        // 主窗口最小化时藏起来。
+        // 注意**不要**因为「主窗口不是活动窗口」就藏：打开设置对话框时主窗口会失活，
+        // 那样一进设置弹幕就没了（用户报过这个）。
+        if (_owner.WindowState == WindowState.Minimized)
         {
             if (IsVisible) Hide();
             return;
