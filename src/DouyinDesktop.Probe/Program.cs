@@ -85,6 +85,48 @@ if (args.Length > 0 && args[0] == "session")
     return same == Math.Min(5, loaded.Items.Count) ? 0 : 1;
 }
 
+// 弹幕接口试探：dotnet run --project src/DouyinDesktop.Probe -- danmaku
+// 路径是抓包确认的，参数还在猜——先看返回什么
+if (args.Length > 0 && args[0] == "danmaku")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var cd = DouyinClient.Create();
+    cd.Log += m => Console.WriteLine("    " + m);
+
+    var f = await cd.GetFeedAsync(5);
+    if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
+
+    foreach (var item in f.Items.Take(3))
+    {
+        long dur = item.Video?.Duration ?? 0;
+        Console.WriteLine($"\n作品 {item.Id}  时长 {dur}ms");
+
+        var p1 = await cd.GetDanmakuAsync(item.Id, 0, 32000);
+        Console.WriteLine($"  窗 0-32s -> start={p1.StartMs} end={p1.EndMs} {p1.Items.Count} 条");
+        foreach (var d in p1.Items.Take(3))
+            Console.WriteLine($"     {d.OffsetMs}ms  {d.Text}");
+
+        var p2 = await cd.GetDanmakuAsync(item.Id, 32000, 64000);
+        Console.WriteLine($"  窗 32-64s -> start={p2.StartMs} end={p2.EndMs} {p2.Items.Count} 条");
+
+        if (p1.Items.Count > 0)
+        {
+            string ass = DouyinDesktop.Core.Models.DanmakuAss.Build(
+                p1.Items, item.Video?.Width ?? 1080, item.Video?.Height ?? 1920);
+            var lines = ass.Split('\n');
+            Console.WriteLine("  ASS 头部：");
+            foreach (var ln in lines.Take(10)) Console.WriteLine("    " + ln.TrimEnd());
+            Console.WriteLine($"  Dialogue 行数 = {lines.Count(x => x.StartsWith("Dialogue:"))}");
+
+            string outPath = Path.Combine(Path.GetTempPath(), "dm-test.ass");
+            File.WriteAllText(outPath, ass);
+            Console.WriteLine("  ASS 已写到 " + outPath);
+            break;      // 一个作品就够了
+        }
+    }
+    return 0;
+}
+
 if (args.Length > 0 && args[0] == "comment")
 {
     using var cc = DouyinClient.Create();

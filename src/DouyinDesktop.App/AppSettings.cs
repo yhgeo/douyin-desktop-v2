@@ -19,6 +19,12 @@ public sealed class AppSettings
     /// <summary>详情页是否显示快捷键提示（可以手动折叠）。</summary>
     public bool ShowShortcuts { get; set; } = true;
 
+    /// <summary>
+    /// 显示弹幕。默认关——不是每个视频都有弹幕，而且渲染走的是 mpv 的字幕轨，
+    /// 关着的时候行为和不支持弹幕的版本完全一样，不会有任何副作用。
+    /// </summary>
+    public bool Danmaku { get; set; }
+
     public static string DefaultPath
         => Path.Combine(DouyinDesktop.Core.DouyinPaths.DataDirectory, "app-settings.json");
 

@@ -152,6 +152,7 @@ public sealed class MpvController : IAsyncDisposable
         A("--no-osc");                   // 不要 mpv 自带的控制条，UI 是我们自己画的
         A("--no-osd-bar");
         A("--osd-level=0");
+        A("--sub-ass-override=no");      // 弹幕的样式写在 ASS 里，别让 mpv 覆盖
         A("--really-quiet");
         A("--force-window=no");
         A("--keepaspect=yes");
@@ -258,6 +259,35 @@ public sealed class MpvController : IAsyncDisposable
         => _ipc.CommandAsync("set", "volume", Math.Clamp(volume, 0, 150).ToString());
 
     public Task SetMuteAsync(bool muted) => _ipc.CommandAsync("set", "mute", Flag(muted));
+
+    // ================= 外挂字幕（弹幕走这条） =================
+
+    /// <summary>
+    /// 挂一条外挂字幕。返回轨道 id，失败返回 -1。
+    ///
+    /// 弹幕为什么要走字幕：视频是 HwndHost（独立 Win32 子窗口），
+    /// 按 airspace 规则它永远盖在 WPF 内容之上，界面层画的弹幕根本看不见。
+    /// 交给 mpv 渲染成字幕，时序、暂停、拖动全都自动跟着视频走。
+    /// </summary>
+    public async Task<int> AddSubtitleAsync(string path)
+    {
+        var r = await _ipc.CommandAsync("sub-add", path, "select");
+        if (r is { ValueKind: JsonValueKind.Object } o &&
+            o.TryGetProperty("data", out var d) &&
+            d.ValueKind == JsonValueKind.Object &&
+            d.TryGetProperty("id", out var id) &&
+            id.TryGetInt32(out int trackId))
+        {
+            return trackId;
+        }
+        return -1;
+    }
+
+    /// <summary>字幕文件内容改了之后让它重新读一遍。</summary>
+    public Task ReloadSubtitleAsync() => _ipc.CommandAsync("sub-reload");
+
+    public Task RemoveSubtitleAsync(int trackId)
+        => _ipc.CommandAsync("sub-remove", trackId.ToString(CultureInfo.InvariantCulture));
 
     public async Task StopAsync()
     {

@@ -457,6 +457,82 @@ public sealed class DouyinClient : IDisposable
     /// 拉一级评论。cursor 传上一页返回的 Cursor，首页传 0。
     /// 登录态下成功率更高（游客态经常只给一部分）。
     /// </summary>
+    /// <summary>
+    /// 视频弹幕。路径是抓包确认的（网页播放器真实请求）：
+    ///   /aweme/v1/web/danmaku/get_v2/   取弹幕
+    ///   /aweme/v1/web/danmaku/conf/get/ 取开关配置
+    ///
+    /// **按 32 秒分段返回**：请求一次只给一段，响应里的 start_time/end_time 就是这段的范围。
+    /// 不是每个视频都有弹幕（实测三个里有一个 danmaku_list 是 null）。
+    /// </summary>
+    public async Task<DanmakuPage> GetDanmakuAsync(
+        string awemeId, long startMs, long endMs, CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("aweme_id", awemeId),
+            new("item_id", awemeId),
+            // 单位是毫秒：传秒的话服务端不认，永远返回第一个 32 秒窗口
+            new("start_time", startMs.ToString()),
+            new("end_time", endMs.ToString()),
+        };
+        ps.AddRange(_profile.PlatformParams());
+        ps.Add(new("webid", _profile.WebId));
+        ps.Add(new("msToken", session.MsToken));
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+        string url = $"https://www.douyin.com/aweme/v1/web/danmaku/get_v2/?{query}" +
+                     $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        AddBrowserHeaders(req, session);
+        req.Headers.Remove("Referer");
+        req.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/video/{awemeId}");
+
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                Log?.Invoke($"弹幕 HTTP {(int)resp.StatusCode}");
+                return DanmakuPage.Empty;
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+
+            long gotStart = root.TryGetProperty("start_time", out var st) ? st.GetInt64() : 0;
+            long gotEnd = root.TryGetProperty("end_time", out var et) ? et.GetInt64() : 0;
+
+            var list = new List<DanmakuItem>();
+            if (root.TryGetProperty("danmaku_list", out var arr) &&
+                arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in arr.EnumerateArray())
+                {
+                    var item = el.Deserialize<DanmakuItem>();
+                    if (item is not null && item.Text.Length > 0) list.Add(item);
+                }
+            }
+
+            Log?.Invoke($"弹幕 {gotStart / 1000}-{gotEnd / 1000}s：{list.Count} 条");
+            return new DanmakuPage(list, gotStart, gotEnd);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
+        {
+            Log?.Invoke("弹幕接口失败：" + ex.Message);
+            return DanmakuPage.Empty;
+        }
+    }
+
     public async Task<CommentPage> GetCommentsAsync(
         string awemeId, long cursor = 0, int count = 20, CancellationToken ct = default)
     {

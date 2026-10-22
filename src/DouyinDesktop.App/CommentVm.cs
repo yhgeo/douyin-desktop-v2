@@ -21,6 +21,7 @@ public sealed class CommentVm : INotifyPropertyChanged
     public ObservableCollection<CommentVm> Replies { get; } = new();
 
     public string Nickname => Model.Nickname;
+    public string AvatarUrl => Model.User?.AvatarUrl ?? "";
     public string Text => Model.Text;
     public string MetaText => Model.MetaText;
     public string LikeText => Model.LikeText;

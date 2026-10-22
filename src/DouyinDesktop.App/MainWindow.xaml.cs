@@ -70,6 +70,15 @@ public partial class MainWindow : Window
     private bool _muted;
     private int _volume = 100;
 
+    // ================= 弹幕 =================
+    private int _danmakuSubId = -1;
+    private string _danmakuAwemeId = "";
+    private string? _danmakuAssPath;
+    private long _danmakuLoadedTo;          // 已经拉到第几毫秒
+    private bool _danmakuBusy;
+    private CancellationTokenSource? _danmakuCts;
+    private readonly Dictionary<string, DanmakuItem> _danmakuItems = new();
+
     private readonly Stopwatch _switchTimer = new();
     private readonly List<string> _statusLines = new();
     private CancellationTokenSource? _prefetchCts;
@@ -521,6 +530,99 @@ public partial class MainWindow : Window
         SetStatus("已回到推荐");
     }
 
+    // ================= 弹幕 =================
+
+    /// <summary>
+    /// 换作品时重置弹幕：摘掉上一条的字幕轨，重新开始拉。
+    /// </summary>
+    private void ResetDanmaku(Aweme item)
+    {
+        _danmakuCts?.Cancel();
+        _danmakuCts?.Dispose();
+        _danmakuCts = null;
+
+        _danmakuItems.Clear();
+        _danmakuLoadedTo = 0;
+        _danmakuAwemeId = item.Id;
+        _danmakuAssPath = null;
+
+        int old = _danmakuSubId;
+        _danmakuSubId = -1;
+        if (old >= 0) _ = RemoveSubtitleQuietlyAsync(old);
+
+        if (!_settings.Danmaku || item.IsImagePost) return;
+
+        var cts = new CancellationTokenSource();
+        _danmakuCts = cts;
+        _ = PumpDanmakuAsync(item, cts.Token);
+    }
+
+    private async Task RemoveSubtitleQuietlyAsync(int id)
+    {
+        try { if (_mpv is not null) await _mpv.RemoveSubtitleAsync(id); }
+        catch { /* 轨道可能已经跟着上一条视频没了 */ }
+    }
+
+    /// <summary>
+    /// 一次拉一个 32 秒窗口，始终保持比播放位置超前 64 秒。
+    /// 接口是分段返回的，只能边播边拉，不能一次要全部。
+    /// </summary>
+    private async Task PumpDanmakuAsync(Aweme item, CancellationToken ct)
+    {
+        if (_danmakuBusy) return;
+        _danmakuBusy = true;
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                double posSec = _mpv?.Position ?? 0;
+                if (_danmakuLoadedTo >= (long)(posSec * 1000) + 64_000) break;
+
+                long start = _danmakuLoadedTo;
+                var page = await _client.GetDanmakuAsync(item.Id, start, start + 32_000, ct);
+                if (ct.IsCancellationRequested) return;
+                if (page.EndMs <= start) break;      // 服务端没给有效窗口，别死循环
+
+                foreach (var d in page.Items) _danmakuItems[d.Id] = d;
+                _danmakuLoadedTo = page.EndMs;
+
+                if (_danmakuItems.Count > 0) await ApplyDanmakuAsync(item, ct);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { AppLog.Write("弹幕失败：" + ex.Message); }
+        finally { _danmakuBusy = false; }
+    }
+
+    /// <summary>把攒到的弹幕写成 ASS，挂到 mpv 上（首次挂轨，之后只重载文件）。</summary>
+    private async Task ApplyDanmakuAsync(Aweme item, CancellationToken ct)
+    {
+        if (_mpv is null) return;
+
+        string ass = DanmakuAss.Build(
+            _danmakuItems.Values.ToList(), item.Video?.Width ?? 0, item.Video?.Height ?? 0);
+
+        string dir = Path.Combine(DouyinPaths.DataDirectory, "danmaku");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, item.Id + ".ass");
+        await File.WriteAllTextAsync(path, ass, ct);
+        if (ct.IsCancellationRequested) return;
+
+        if (_danmakuSubId < 0 || _danmakuAssPath != path)
+        {
+            int old = _danmakuSubId;
+            if (old >= 0) await RemoveSubtitleQuietlyAsync(old);
+
+            _danmakuSubId = await _mpv.AddSubtitleAsync(path);
+            _danmakuAssPath = path;
+            AppLog.Write($"弹幕挂上：{_danmakuItems.Count} 条，轨道 {_danmakuSubId}");
+        }
+        else
+        {
+            await _mpv.ReloadSubtitleAsync();
+        }
+    }
+
     /// <summary>
     /// 缓冲区快见底时补货。
     /// 留 6 条的余量而不是 3 条：拉一批要 2 秒多，余量太小的话
@@ -582,6 +684,7 @@ public partial class MainWindow : Window
         if (item.IsImagePost)
         {
             _index = index;
+            ResetDanmaku(item);              // 图集没有弹幕，顺手把上一条的字幕轨摘掉
             ShowInfo(item);
             await ShowImagePostAsync(item);
             UpdateIndexLabel();
@@ -628,6 +731,7 @@ public partial class MainWindow : Window
             SetStatus("加载失败：" + ex.Message);
         }
 
+        ResetDanmaku(item);
         _lastFromCache = _proxy.HasPrefetch(item.Id);
         PrefetchAround(index);
         UpdateIndexLabel();
@@ -1150,6 +1254,15 @@ public partial class MainWindow : Window
             double dur = _mpv?.Duration ?? 0;
             Progress.Value = dur > 0 ? Math.Clamp(pos / dur, 0, 1) : 0;
             TimeText.Text = $"{Fmt(pos)} / {Fmt(dur)}";
+
+            // 快播到已拉取的边缘了，接着往后拉一段（每 32 秒一次）
+            if (_settings.Danmaku && !_danmakuBusy && _danmakuCts is { IsCancellationRequested: false } cts
+                && _index >= 0 && _index < _items.Count
+                && _items[_index].Id == _danmakuAwemeId
+                && (long)(pos * 1000) + 32_000 > _danmakuLoadedTo)
+            {
+                _ = PumpDanmakuAsync(_items[_index], cts.Token);
+            }
         });
     }
 
@@ -1302,7 +1415,10 @@ public partial class MainWindow : Window
     {
         try
         {
-            // Esc 不进快捷键表：先退全屏，再退作者流（回推荐 + 详情页）
+            // Esc 是「退一层」，按这个顺序：
+            //   全屏   -> 退全屏
+            //   作者流 -> 回推荐（同时切回详情页）
+            //   其它 Tab -> 回详情页
             if (e.Key == Key.Escape)
             {
                 if (_fullscreen)
@@ -1317,6 +1433,13 @@ public partial class MainWindow : Window
                     // 必须在 await 之前置 Handled：await 一让出，事件就已经返回了
                     e.Handled = true;
                     await LeaveAuthorAsync();
+                    return;
+                }
+
+                if (_sideTab != SideTab.Detail)
+                {
+                    e.Handled = true;
+                    SwitchTab(SideTab.Detail);
                 }
                 return;
             }
@@ -1525,6 +1648,9 @@ public partial class MainWindow : Window
 
         // 设置里可能改了/取消了快捷键，回来要刷新详情页那张表
         RefreshShortcuts();
+
+        // 弹幕开关可能变了，按新设置重来一遍
+        if (_index >= 0 && _index < _items.Count) ResetDanmaku(_items[_index]);
     }
 
     /// <summary>

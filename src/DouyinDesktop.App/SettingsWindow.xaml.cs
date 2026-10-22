@@ -39,6 +39,7 @@ public partial class SettingsWindow : Window
 
         DataPathText.Text = DouyinDesktop.Core.DouyinPaths.DataDirectory;
         ImageOnlyCheck.IsChecked = settings.ImageOnly;
+        DanmakuCheck.IsChecked = settings.Danmaku;
         RefreshAccount();
     }
 
@@ -52,6 +53,12 @@ public partial class SettingsWindow : Window
     private void OnImageOnlyChanged(object sender, RoutedEventArgs e)
     {
         _settings.ImageOnly = ImageOnlyCheck.IsChecked == true;
+        _settings.Save();
+    }
+
+    private void OnDanmakuChanged(object sender, RoutedEventArgs e)
+    {
+        _settings.Danmaku = DanmakuCheck.IsChecked == true;
         _settings.Save();
     }
 

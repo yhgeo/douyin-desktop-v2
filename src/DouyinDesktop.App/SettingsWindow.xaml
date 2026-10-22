@@ -156,6 +156,17 @@
                                        Text="图集在推荐流里约占 5%，开启后会连续拉几次直到凑够（最多 6 次请求）。请求比较频繁，不建议反复按 R 刷新。" />
                         </StackPanel>
                     </Border>
+
+                    <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,12,0,0">
+                        <StackPanel>
+                            <CheckBox x:Name="DanmakuCheck" Content="显示弹幕"
+                                      Foreground="{StaticResource TextBrush}" FontSize="13"
+                                      Checked="OnDanmakuChanged" Unchecked="OnDanmakuChanged" />
+                            <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,9,0,0"
+                                       TextWrapping="Wrap" LineHeight="18"
+                                       Text="只有创作者开启了弹幕的作品才有。弹幕交给播放器渲染成字幕轨（视频是独立窗口，界面层盖不上去），所以外观是白字黑边、从右往左滚动。" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Grid>
 

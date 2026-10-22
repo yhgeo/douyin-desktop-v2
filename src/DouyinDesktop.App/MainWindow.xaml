@@ -234,53 +234,94 @@
                             <ItemsControl x:Name="CommentList">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border BorderBrush="#1F1F28" BorderThickness="0,0,0,1"
-                                                Margin="0,0,0,14" Padding="0,0,0,14">
-                                            <StackPanel>
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding Nickname}" FontSize="12"
-                                                               Foreground="#9A9AA6" />
-                                                    <TextBlock Text="{Binding MetaText}" FontSize="11"
-                                                               Foreground="#5A5A66" Margin="8,0,0,0" />
-                                                </StackPanel>
+                                        <!-- 一条评论：左头像 + 右内容，两列对齐 -->
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <!-- 圆形头像：Border 本身不裁剪子元素，用 OpacityMask 做圆 -->
+                                            <Border Grid.Column="0" Width="32" Height="32"
+                                                    CornerRadius="16" Background="#24242E"
+                                                    VerticalAlignment="Top">
+                                                <Border.OpacityMask>
+                                                    <VisualBrush>
+                                                        <VisualBrush.Visual>
+                                                            <Border Width="32" Height="32"
+                                                                    CornerRadius="16" Background="Black" />
+                                                        </VisualBrush.Visual>
+                                                    </VisualBrush>
+                                                </Border.OpacityMask>
+                                                <Image Source="{Binding AvatarUrl}" Stretch="UniformToFill" />
+                                            </Border>
+
+                                            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                                <!-- 昵称 + 时间/IP 分两行，左边缘统一对齐 -->
+                                                <TextBlock Text="{Binding Nickname}" FontSize="12"
+                                                           Foreground="#9A9AA6"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding MetaText}" FontSize="10.5"
+                                                           Foreground="#55555F" Margin="0,3,0,0" />
 
                                                 <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
-                                                           FontSize="13" LineHeight="21" Margin="0,5,0,0" />
+                                                           FontSize="13.5" LineHeight="22"
+                                                           Margin="0,8,0,0" />
 
-                                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                                    <TextBlock Text="{Binding LikeText}" FontSize="11"
-                                                               Foreground="#5A5A66" Margin="0,0,14,0" />
-                                                    <Button Content="{Binding ExpandText}" Tag="{Binding}"
-                                                            Click="OnToggleReplies"
+                                                <!-- 底部操作行：展开回复在左，点赞靠右 -->
+                                                <Grid Margin="0,9,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <Button Grid.Column="0" Content="{Binding ExpandText}"
+                                                            Tag="{Binding}" Click="OnToggleReplies"
+                                                            HorizontalAlignment="Left"
                                                             Visibility="{Binding ExpandVisibility}"
                                                             Style="{StaticResource LinkButton}" />
-                                                </StackPanel>
 
-                                                <!-- 回复：缩进 + 左侧竖线，和官方一样展开在原评论下面 -->
+                                                    <TextBlock Grid.Column="1" Text="{Binding LikeText}"
+                                                               FontSize="11" Foreground="#55555F"
+                                                               VerticalAlignment="Center" />
+                                                </Grid>
+
+                                                <!-- 回复：缩进对齐到正文左边缘（32 头像 + 10 间距 = 42） -->
                                                 <Border BorderBrush="#2A2A36" BorderThickness="2,0,0,0"
-                                                        Margin="6,10,0,0" Padding="12,2,0,0"
+                                                        Margin="0,12,0,0" Padding="10,2,0,0"
                                                         Visibility="{Binding RepliesVisibility}">
                                                     <ItemsControl ItemsSource="{Binding Replies}">
                                                         <ItemsControl.ItemTemplate>
                                                             <DataTemplate>
-                                                                <StackPanel Margin="0,0,0,10">
-                                                                    <StackPanel Orientation="Horizontal">
-                                                                        <TextBlock Text="{Binding Nickname}"
-                                                                                   FontSize="11" Foreground="#8A8A98" />
-                                                                        <TextBlock Text="{Binding MetaText}"
-                                                                                   FontSize="10" Foreground="#4A4A56"
-                                                                                   Margin="6,0,0,0" />
-                                                                    </StackPanel>
+                                                                <StackPanel Margin="0,0,0,12">
+                                                                    <TextBlock Text="{Binding Nickname}"
+                                                                               FontSize="11.5" Foreground="#8A8A98"
+                                                                               TextTrimming="CharacterEllipsis" />
                                                                     <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
-                                                                               FontSize="12" LineHeight="19"
-                                                                               Foreground="#D0D0DA" Margin="0,4,0,0" />
+                                                                               FontSize="12.5" LineHeight="20"
+                                                                               Foreground="#C8C8D4" Margin="0,5,0,0" />
+                                                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                                                        <TextBlock Text="{Binding MetaText}"
+                                                                                   FontSize="10.5" Foreground="#4A4A56" />
+                                                                        <TextBlock Text="{Binding LikeText}"
+                                                                                   FontSize="10.5" Foreground="#4A4A56"
+                                                                                   Margin="12,0,0,0" />
+                                                                    </StackPanel>
                                                                 </StackPanel>
                                                             </DataTemplate>
                                                         </ItemsControl.ItemTemplate>
                                                     </ItemsControl>
                                                 </Border>
                                             </StackPanel>
-                                        </Border>
+
+                                            <!-- 分割线从正文左边缘开始（32 头像 + 10 间距 = 42），和头像列错开 -->
+                                            <Border Grid.Row="1" Grid.ColumnSpan="2" Height="1"
+                                                    Background="#16161D" Margin="42,16,0,14" />
+                                        </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
