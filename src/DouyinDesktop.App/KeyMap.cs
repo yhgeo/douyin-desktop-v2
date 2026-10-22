@@ -23,14 +23,28 @@ public sealed class KeyMap
         new("seekForward","快进 5 秒",    Key.Right,  new[] { Key.D }, true),
         new("mute",       "静音",         Key.M,      Array.Empty<Key>(), true),
         new("fullscreen", "全屏",         Key.F,      Array.Empty<Key>(), true),
-        new("refresh",    "换一批推荐",   Key.R,      Array.Empty<Key>()),
-        new("login",      "登录",         Key.L,      Array.Empty<Key>()),
-        new("tab",        "详情 / 评论",  Key.Tab,    Array.Empty<Key>()),
-        new("author",     "作者主页 / 回推荐", Key.U, Array.Empty<Key>()),
+        new("tab",        "详情 / 评论 / 主页", Key.Tab, Array.Empty<Key>()),
         new("follow",     "关注页 / 推荐页", Key.G,   Array.Empty<Key>()),
+
+        // 下面三个**默认不绑键**：都不是高频操作，绑着反而容易误触。
+        // 要用的自己去 设置 → 快捷键 里加。
+        //   · 回推荐：Esc 已经能做（全屏时先退全屏），不需要单独的键
+        //   · 换一批：翻到快见底时会自动补，不必手动刷
+        //   · 登录：设置 → 账号 里有扫码入口
+        new("refresh",    "换一批推荐",   Key.None,   Array.Empty<Key>()),
+        new("login",      "登录",         Key.None,   Array.Empty<Key>()),
+        new("author",     "作者主页 / 回推荐", Key.None, Array.Empty<Key>()),
     };
 
     private readonly Dictionary<string, Key> _keys = new();
+
+    // 配置版本。v2 起「作者主页 / 换一批 / 登录」默认不绑键。
+    // 老配置里存着旧默认（U / R / L，或者用户自己改过的别的键），
+    // 留着会让人觉得"改了没生效"，所以升级时统一清一次，之后就按用户的选择来。
+    private const string VersionKey = "__v";
+    private const string CurrentVersion = "2";
+
+    private static readonly HashSet<string> UnboundInV2 = new() { "refresh", "login", "author" };
 
     public event Action? Changed;
 
@@ -91,10 +105,19 @@ public sealed class KeyMap
                 File.ReadAllText(DefaultPath));
             if (saved is null) return map;
 
+            bool legacy = !saved.TryGetValue(VersionKey, out string? ver) || ver != CurrentVersion;
+
             foreach (var (id, name) in saved)
             {
+                if (id == VersionKey) continue;
+
+                // 老配置：这三个键的旧绑定直接丢掉，落到新默认（未设置）
+                if (legacy && UnboundInV2.Contains(id)) continue;
+
                 if (Enum.TryParse<Key>(name, out var key)) map._keys[id] = key;
             }
+
+            if (legacy) map.Save();     // 迁移只做一次
         }
         catch (Exception ex) when (ex is IOException or JsonException)
         {
@@ -109,6 +132,7 @@ public sealed class KeyMap
         {
             Directory.CreateDirectory(Path.GetDirectoryName(DefaultPath)!);
             var data = _keys.ToDictionary(kv => kv.Key, kv => kv.Value.ToString());
+            data[VersionKey] = CurrentVersion;
             File.WriteAllText(DefaultPath, JsonSerializer.Serialize(data,
                 new JsonSerializerOptions { WriteIndented = true }));
         }

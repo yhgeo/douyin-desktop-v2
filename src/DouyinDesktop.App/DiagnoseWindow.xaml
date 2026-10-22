@@ -16,7 +16,7 @@
 
         <Grid Grid.Row="0" Height="40" Background="{StaticResource BgBrush}"
               MouseLeftButtonDown="OnTitleDrag">
-            <TextBlock Text="推荐流诊断（抓网页版真实响应）" Margin="18,0,0,0"
+            <TextBlock Text="网络抓包诊断（网页版真实请求）" Margin="18,0,0,0"
                        VerticalAlignment="Center" FontSize="12"
                        Foreground="{StaticResource SubTextBrush}" />
             <Button Content="✕" Style="{StaticResource CloseButton}"

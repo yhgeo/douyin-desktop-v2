@@ -69,9 +69,6 @@ public partial class MainWindow : Window
     private bool _authorMode;
     private bool _muted;
     private int _volume = 100;
-    private double _aspect = 9.0 / 16.0;
-    /// <summary>视频还没 file-loaded，先别按新宽高比重排画布。</summary>
-    private bool _layoutAfterLoad;
 
     private readonly Stopwatch _switchTimer = new();
     private readonly List<string> _statusLines = new();
@@ -629,15 +626,6 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             SetStatus("加载失败：" + ex.Message);
-        }
-        finally
-        {
-            // 新画面到位了再调尺寸，避免上一条画面被挤一下
-            if (_layoutAfterLoad)
-            {
-                _layoutAfterLoad = false;
-                LayoutVideo(animate: true);
-            }
         }
 
         _lastFromCache = _proxy.HasPrefetch(item.Id);
@@ -1224,19 +1212,7 @@ public partial class MainWindow : Window
         // 换视频后回到顶部，否则长文案还停在上一条的滚动位置
         DetailPane.ScrollToTop();
 
-        // 图集用第一张图的宽高比，视频用视频的
-        _aspect = item.IsImagePost && item.Images is { Count: > 0 } imgs
-            ? (imgs[0].Width > 0 && imgs[0].Height > 0
-                ? (double)imgs[0].Width / imgs[0].Height
-                : 3.0 / 4.0)
-            : item.Video?.Aspect ?? 9.0 / 16.0;
-
-        // 视频先别重排画布：新内容还没到，这时候按新宽高比缩放，
-        // 看到的是**上一条**画面被挤压/缩小一下，然后才切过去。
-        // 等 file-loaded 之后再排（PlayIndexAsync 里），变化就和新画面同时发生。
-        if (item.IsImagePost) LayoutVideo();
-        else _layoutAfterLoad = true;
-
+        // 画布尺寸固定铺满，不随作品宽高比变化——宽高比交给 mpv 做黑边
         UpdateIndexLabel();
 
         // 正在看评论/主页的话，切作品就跟着换
@@ -1279,47 +1255,28 @@ public partial class MainWindow : Window
     /// 之间直接跳会"咯噔"一下，160ms 的缓动看起来就是滑过去的。
     /// 窗口拉伸时必须是 false，否则拖边框会拖泥带水。
     /// </summary>
-    private void LayoutVideo(bool animate = false)
+    /// <summary>
+    /// 画布**固定铺满**整个视频区，宽高比完全交给 mpv（--keepaspect=yes + --panscan=0）。
+    ///
+    /// 以前是「按视频宽高比算画布尺寸」，切换作品时尺寸要变（推荐流里横屏 16:9
+    /// 和竖屏 9:16 是混着的），无论先变还是后变，总有一边会露出上一条画面被挤压的样子。
+    ///
+    /// 现在画布尺寸**永远不变**，mpv 自己在新视频周围画黑边——视觉结果完全一样
+    /// （黑边本来就是黑的），但切换时没有任何重排，跳变从结构上就不存在了。
+    /// 抖音官方播放器也是这个思路：播放器窗口固定，画面在里面适配。
+    /// </summary>
+    private void LayoutVideo()
     {
         double w = VideoHost.ActualWidth, h = VideoHost.ActualHeight;
         if (w <= 1 || h <= 1) return;
 
-        double aspect = _aspect > 0.1 ? _aspect : 9.0 / 16.0;
-        double targetW, targetH;
-        if (w / h > aspect) { targetH = h; targetW = h * aspect; }
-        else { targetW = w; targetH = w / aspect; }
+        // 只在尺寸真的变了才赋值（拖动窗口时避免无谓的 SetWindowPos）
+        if (Math.Abs(Surface.Width - w) < 0.5 && Math.Abs(Surface.Height - h) < 0.5) return;
 
-        targetW = Math.Max(1, targetW);
-        targetH = Math.Max(1, targetH);
-
-        double fromW = Surface.ActualWidth > 1 ? Surface.ActualWidth : Surface.Width;
-        double fromH = Surface.ActualHeight > 1 ? Surface.ActualHeight : Surface.Height;
-
-        // 没实质变化就别动，避免每切一条都抖一下
-        if (Math.Abs(fromW - targetW) < 1 && Math.Abs(fromH - targetH) < 1) return;
-
-        AppLog.Write($"画布 {fromW:F0}×{fromH:F0} -> {targetW:F0}×{targetH:F0}" +
-                     (animate ? "（缓动）" : ""));
-
-        // 先清掉可能还在跑的动画，否则直接赋基值不生效
         Surface.BeginAnimation(FrameworkElement.WidthProperty, null);
         Surface.BeginAnimation(FrameworkElement.HeightProperty, null);
-        Surface.Width = targetW;
-        Surface.Height = targetH;
-
-        if (!animate || fromW <= 1 || fromH <= 1) return;
-
-        var ease = new System.Windows.Media.Animation.QuadraticEase
-        {
-            EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut,
-        };
-        var dur = TimeSpan.FromMilliseconds(160);
-        Surface.BeginAnimation(FrameworkElement.WidthProperty,
-            new System.Windows.Media.Animation.DoubleAnimation(fromW, targetW, dur)
-            { EasingFunction = ease });
-        Surface.BeginAnimation(FrameworkElement.HeightProperty,
-            new System.Windows.Media.Animation.DoubleAnimation(fromH, targetH, dur)
-            { EasingFunction = ease });
+        Surface.Width = w;
+        Surface.Height = h;
     }
 
     private void OnVideoHostSizeChanged(object sender, SizeChangedEventArgs e) => LayoutVideo();

@@ -39,7 +39,9 @@ public partial class DiagnoseWindow : Window
     {
         try
         {
-            string dataDir = DouyinDesktop.Core.DouyinPaths.WebViewDiagnoseDirectory;
+            // 复用主程序的 WebView2 数据目录：这样抓包窗口里已经是登录态，
+            // 不用重新扫码（登录后网页版才能正常播放和出弹幕）
+            string dataDir = DouyinDesktop.Core.DouyinPaths.WebViewDirectory;
             Directory.CreateDirectory(dataDir);
 
             var options = new CoreWebView2EnvironmentOptions
@@ -57,7 +59,8 @@ public partial class DiagnoseWindow : Window
             receiver.DevToolsProtocolEventReceived += OnResponseReceived;
             await Web.CoreWebView2.CallDevToolsProtocolMethodAsync("Network.enable", "{}");
 
-            StatusText.Text = "页面打开后自己点「推荐」、往下刷；刷够了点右下角「完成并输出报告」";
+            StatusText.Text = "找一条**带弹幕**的视频（播放器底部有红色「弹」字按钮）点开播几秒，" +
+                              "然后点右下角「完成并输出报告」";
             Web.CoreWebView2.Navigate("https://www.douyin.com/");
         }
         catch (Exception ex)
