@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 
 namespace DouyinDesktop.App;
@@ -39,7 +40,7 @@ public partial class SettingsWindow : Window
 
         DataPathText.Text = DouyinDesktop.Core.DouyinPaths.DataDirectory;
         ImageOnlyCheck.IsChecked = settings.ImageOnly;
-        DanmakuCheck.IsChecked = settings.Danmaku;
+        LoadDanmakuUi();
         RefreshAccount();
     }
 
@@ -60,6 +61,76 @@ public partial class SettingsWindow : Window
     {
         _settings.Danmaku = DanmakuCheck.IsChecked == true;
         _settings.Save();
+        if (!_danmakuLoading) DanmakuOptions.IsEnabled = _settings.Danmaku;
+    }
+
+    // ================= 弹幕外观 =================
+
+    private bool _danmakuLoading;
+
+    /// <summary>把配置里的值灌进控件。灌的过程中别回写，否则初始化就会触发一堆保存。</summary>
+    private void LoadDanmakuUi()
+    {
+        _danmakuLoading = true;
+        try
+        {
+            DanmakuCheck.IsChecked = _settings.Danmaku;
+            FontSlider.Value = Math.Clamp(_settings.DanmakuFontPercent, FontSlider.Minimum, FontSlider.Maximum);
+            OpacitySlider.Value = Math.Clamp(_settings.DanmakuOpacity, OpacitySlider.Minimum, OpacitySlider.Maximum);
+            OutlineSlider.Value = Math.Clamp(_settings.DanmakuOutlinePercent, OutlineSlider.Minimum, OutlineSlider.Maximum);
+            SpeedSlider.Value = Math.Clamp(_settings.DanmakuSpeed, SpeedSlider.Minimum, SpeedSlider.Maximum);
+
+            UpdateDanmakuLabels();
+            UpdateAreaButtons();
+            DanmakuOptions.IsEnabled = _settings.Danmaku;
+        }
+        finally
+        {
+            _danmakuLoading = false;
+        }
+    }
+
+    private void UpdateDanmakuLabels()
+    {
+        FontValue.Text = $"{FontSlider.Value:0.0}%";
+        OpacityValue.Text = $"{OpacitySlider.Value:0}%";
+        OutlineValue.Text = $"{OutlineSlider.Value:0}%";
+        SpeedValue.Text = $"{SpeedSlider.Value:0.#} 秒";
+    }
+
+    private void OnDanmakuStyleChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        // XAML 解析阶段滑杆的 Value 也会变一次，那时 _settings 和别的控件都还没建好
+        if (_danmakuLoading || _settings is null || FontValue is null) return;
+
+        _settings.DanmakuFontPercent = Math.Round(FontSlider.Value, 1);
+        _settings.DanmakuOpacity = (int)Math.Round(OpacitySlider.Value);
+        _settings.DanmakuOutlinePercent = Math.Round(OutlineSlider.Value, 1);
+        _settings.DanmakuSpeed = Math.Round(SpeedSlider.Value, 1);
+
+        UpdateDanmakuLabels();
+        _settings.Save();
+    }
+
+    private void OnDanmakuAreaClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button b || b.CommandParameter is not string area) return;
+
+        _settings.DanmakuArea = area;
+        _settings.Save();
+        UpdateAreaButtons();
+    }
+
+    private void UpdateAreaButtons()
+    {
+        foreach (var (btn, id) in new (Button, string)[]
+                 {
+                     (AreaTop, "top"), (AreaMiddle, "middle"),
+                     (AreaBottom, "bottom"), (AreaFull, "full"),
+                 })
+        {
+            btn.Tag = _settings.DanmakuArea == id ? "active" : null;
+        }
     }
 
     private void SwitchPage(string page)

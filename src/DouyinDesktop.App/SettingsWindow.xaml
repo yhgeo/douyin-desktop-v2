@@ -143,6 +143,7 @@
 
             <!-- 播放页 -->
             <Grid x:Name="PagePlay" Grid.Column="1" Visibility="Collapsed">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Margin="28,26,28,24">
                     <TextBlock Text="播放" FontSize="15" FontWeight="SemiBold" />
 
@@ -162,12 +163,110 @@
                             <CheckBox x:Name="DanmakuCheck" Content="显示弹幕"
                                       Foreground="{StaticResource TextBrush}" FontSize="13"
                                       Checked="OnDanmakuChanged" Unchecked="OnDanmakuChanged" />
-                            <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,9,0,0"
-                                       TextWrapping="Wrap" LineHeight="18"
-                                       Text="只有创作者开启了弹幕的作品才有。弹幕交给播放器渲染成字幕轨（视频是独立窗口，界面层盖不上去），所以外观是白字黑边、从右往左滚动。" />
+
+                            <!-- 勾上才可调 -->
+                            <StackPanel x:Name="DanmakuOptions" Margin="0,16,0,0" IsEnabled="False">
+
+                                <!-- 显示区域 -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="76" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="显示区域" FontSize="12" Foreground="#8C8C99"
+                                               VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <Button x:Name="AreaTop" Content="顶部" CommandParameter="top"
+                                                Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
+                                        <Button x:Name="AreaMiddle" Content="中间" CommandParameter="middle"
+                                                Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
+                                        <Button x:Name="AreaBottom" Content="底部" CommandParameter="bottom"
+                                                Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
+                                        <Button x:Name="AreaFull" Content="全屏" CommandParameter="full"
+                                                Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- 字号 -->
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="76" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="56" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="字号" FontSize="12" Foreground="#8C8C99"
+                                               VerticalAlignment="Center" />
+                                    <Slider x:Name="FontSlider" Grid.Column="1" Minimum="2" Maximum="6"
+                                            TickFrequency="0.1" IsSnapToTickEnabled="True"
+                                            Style="{StaticResource DarkSlider}"
+                                            ValueChanged="OnDanmakuStyleChanged" />
+                                    <TextBlock x:Name="FontValue" Grid.Column="2" FontSize="12"
+                                               Foreground="{StaticResource TextBrush}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                </Grid>
+
+                                <!-- 不透明度 -->
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="76" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="56" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="不透明度" FontSize="12" Foreground="#8C8C99"
+                                               VerticalAlignment="Center" />
+                                    <Slider x:Name="OpacitySlider" Grid.Column="1" Minimum="10" Maximum="100"
+                                            TickFrequency="5" IsSnapToTickEnabled="True"
+                                            Style="{StaticResource DarkSlider}"
+                                            ValueChanged="OnDanmakuStyleChanged" />
+                                    <TextBlock x:Name="OpacityValue" Grid.Column="2" FontSize="12"
+                                               Foreground="{StaticResource TextBrush}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                </Grid>
+
+                                <!-- 描边 -->
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="76" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="56" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="描边" FontSize="12" Foreground="#8C8C99"
+                                               VerticalAlignment="Center" />
+                                    <Slider x:Name="OutlineSlider" Grid.Column="1" Minimum="0" Maximum="30"
+                                            TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Style="{StaticResource DarkSlider}"
+                                            ValueChanged="OnDanmakuStyleChanged" />
+                                    <TextBlock x:Name="OutlineValue" Grid.Column="2" FontSize="12"
+                                               Foreground="{StaticResource TextBrush}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                </Grid>
+
+                                <!-- 速度 -->
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="76" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="56" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="移动速度" FontSize="12" Foreground="#8C8C99"
+                                               VerticalAlignment="Center" />
+                                    <Slider x:Name="SpeedSlider" Grid.Column="1" Minimum="3" Maximum="15"
+                                            TickFrequency="0.5" IsSnapToTickEnabled="True"
+                                            Style="{StaticResource DarkSlider}"
+                                            ValueChanged="OnDanmakuStyleChanged" />
+                                    <TextBlock x:Name="SpeedValue" Grid.Column="2" FontSize="12"
+                                               Foreground="{StaticResource TextBrush}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                </Grid>
+
+                                <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,14,0,0"
+                                           TextWrapping="Wrap" LineHeight="18"
+                                           Text="只有创作者开启了弹幕的作品才有。弹幕由播放器渲染成字幕轨（视频是独立窗口，界面层盖不上去），所以外观只能是白字黑边、从右往左滚。" />
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </StackPanel>
+                </ScrollViewer>
             </Grid>
 
             <!-- 关于页 -->

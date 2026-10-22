@@ -126,6 +126,68 @@
         </Style.Triggers>
     </Style>
 
+    <!-- 细滑杆：设置页用。系统默认样式在暗色面板上是一块浅灰，很跳 -->
+    <Style x:Key="DarkSlider" TargetType="Slider">
+        <Setter Property="Height" Value="18" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Slider">
+                    <Grid VerticalAlignment="Center">
+                        <Border Height="4" CornerRadius="2" Background="#2A2A36" />
+                        <Track x:Name="PART_Track">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="Slider.DecreaseLarge" Opacity="0" Focusable="False" />
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="Slider.IncreaseLarge" Opacity="0" Focusable="False" />
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Width="13" Height="13" Cursor="Hand">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Ellipse Fill="#F2F2F5" />
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 分段选择按钮：Tag="active" 表示选中。用于「顶部/中间/底部/全屏」这种单选 -->
+    <Style x:Key="SegButton" TargetType="Button">
+        <Setter Property="Foreground" Value="#7A8AA8" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Margin" Value="0,0,6,0" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" CornerRadius="6" Background="#1F1F28" Padding="12,5">
+                        <TextBlock Text="{TemplateBinding Content}"
+                                   Foreground="{TemplateBinding Foreground}"
+                                   FontSize="{TemplateBinding FontSize}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#26262F" />
+                        </Trigger>
+                        <!-- 选中状态放后面，鼠标悬停不会盖掉它 -->
+                        <Trigger Property="Tag" Value="active">
+                            <Setter TargetName="Bd" Property="Background" Value="#3A1D26" />
+                            <Setter Property="Foreground" Value="#FE2C55" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- 自绘标题栏按钮。图标用 Path 画而不是字符：
          字符图标在不同 DPI 下字重、基线都不一致，三个按钮看起来会歪。 -->
     <Style x:Key="CaptionButton" TargetType="Button">

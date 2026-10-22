@@ -16,10 +16,15 @@ public partial class App : Application
         base.OnStartup(e);
 
         // --diagnose：只开诊断窗口，不启动主界面
+        // --settings：只开设置窗口（调界面时用，不用先起播放器）
         // （StartupUri 已在 App.xaml 里去掉，否则会两个窗口一起开）
         Window win = e.Args.Contains("--diagnose")
             ? new DiagnoseWindow()
-            : new MainWindow();
+            : e.Args.Contains("--settings")
+                ? new SettingsWindow(KeyMap.Load(), AppSettings.Load(),
+                    DouyinDesktop.Core.Api.DouyinClient.Create(),
+                    () => Task.FromResult(false), () => { })
+                : new MainWindow();
 
         MainWindow = win;
         win.Show();
