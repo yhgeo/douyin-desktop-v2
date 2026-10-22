@@ -25,21 +25,59 @@ public sealed class AppSettings
     /// </summary>
     public bool Danmaku { get; set; }
 
+    // ---- 弹幕外观（都是相对量，换分辨率不用重调）----
+
+    /// <summary>字号占画面高度的百分比。</summary>
+    public double DanmakuFontPercent { get; set; } = 3.2;
+
+    /// <summary>不透明度 0-100。</summary>
+    public int DanmakuOpacity { get; set; } = 90;
+
+    /// <summary>描边宽度，占字号的百分比（0 = 不描边）。</summary>
+    public double DanmakuOutlinePercent { get; set; } = 10;
+
+    /// <summary>一条弹幕从进入到完全离开用几秒。</summary>
+    public double DanmakuSpeed { get; set; } = 8;
+
+    /// <summary>显示区域：top / middle / bottom / full。</summary>
+    public string DanmakuArea { get; set; } = "top";
+
+    public DouyinDesktop.Core.Models.DanmakuStyle ToDanmakuStyle() => new()
+    {
+        FontPercent = DanmakuFontPercent,
+        Opacity = DanmakuOpacity,
+        OutlineRatio = DanmakuOutlinePercent / 100.0,
+        SpeedSeconds = DanmakuSpeed,
+        Area = DanmakuArea switch
+        {
+            "middle" => DouyinDesktop.Core.Models.DanmakuArea.Middle,
+            "bottom" => DouyinDesktop.Core.Models.DanmakuArea.Bottom,
+            "full" => DouyinDesktop.Core.Models.DanmakuArea.Full,
+            _ => DouyinDesktop.Core.Models.DanmakuArea.Top,
+        },
+    };
+
     public static string DefaultPath
         => Path.Combine(DouyinDesktop.Core.DouyinPaths.DataDirectory, "app-settings.json");
 
     public static AppSettings Load()
     {
+        AppSettings s;
         try
         {
-            if (!File.Exists(DefaultPath)) return new AppSettings();
-            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(DefaultPath))
-                   ?? new AppSettings();
+            s = File.Exists(DefaultPath)
+                ? JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(DefaultPath)) ?? new AppSettings()
+                : new AppSettings();
         }
         catch (Exception ex) when (ex is IOException or JsonException)
         {
-            return new AppSettings();
+            s = new AppSettings();
         }
+
+        // 写回一次：弹幕外观这些项没有界面控件，只在配置文件里调，
+        // 所以每次启动都把完整的字段落盘，用户打开文件就知道有哪些能改。
+        s.Save();
+        return s;
     }
 
     public void Save()

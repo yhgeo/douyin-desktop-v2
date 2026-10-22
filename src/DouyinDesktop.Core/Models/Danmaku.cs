@@ -28,6 +28,37 @@ public sealed record DanmakuPage(
     public bool HasItems => Items.Count > 0;
 }
 
+/// <summary>弹幕显示区域。</summary>
+public enum DanmakuArea
+{
+    Top,
+    Middle,
+    Bottom,
+    Full,
+}
+
+/// <summary>
+/// 弹幕外观参数。都是相对量，换分辨率不用重调。
+/// </summary>
+public sealed record DanmakuStyle
+{
+    /// <summary>字号占画面高度的百分比（2.0 - 6.0）。</summary>
+    public double FontPercent { get; init; } = 3.2;
+
+    /// <summary>不透明度 0-100。太高会挡住画面，太低看不清。</summary>
+    public int Opacity { get; init; } = 90;
+
+    /// <summary>描边宽度（相对字号的比例，0 = 不描边）。</summary>
+    public double OutlineRatio { get; init; } = 0.10;
+
+    /// <summary>一条弹幕从进入画面到完全离开用几秒（3 - 15）。</summary>
+    public double SpeedSeconds { get; init; } = 8;
+
+    public DanmakuArea Area { get; init; } = DanmakuArea.Top;
+
+    public static readonly DanmakuStyle Default = new();
+}
+
 /// <summary>
 /// 把弹幕列表变成 ASS 字幕。
 ///
@@ -37,22 +68,40 @@ public sealed record DanmakuPage(
 /// </summary>
 public static class DanmakuAss
 {
-    private const int LaneCount = 6;
-    private const double ScreenSeconds = 8.0;   // 一条弹幕横穿屏幕用多久
-
     /// <summary>
     /// 生成 ASS。items 里的 OffsetMs 是**相对视频开头**的绝对时间，
     /// 所以分窗拉回来的也能拼在同一个脚本里。
     /// </summary>
-    public static string Build(IReadOnlyList<DanmakuItem> items, int videoWidth, int videoHeight)
+    public static string Build(
+        IReadOnlyList<DanmakuItem> items, int videoWidth, int videoHeight,
+        DanmakuStyle? style = null)
     {
+        style ??= DanmakuStyle.Default;
+
         // PlayRes 跟着视频走，不然竖屏视频里坐标会全错位
         int w = videoWidth > 0 ? videoWidth : 1080;
         int h = videoHeight > 0 ? videoHeight : 1920;
 
-        int fontSize = Math.Max(18, h / 38);
-        int laneHeight = fontSize + h / 60;
-        int top = h / 12;
+        double fontPct = Math.Clamp(style.FontPercent, 1.5, 8.0);
+        int fontSize = Math.Max(12, (int)Math.Round(h * fontPct / 100.0));
+
+        double outlineRatio = Math.Clamp(style.OutlineRatio, 0, 0.3);
+        double outline = Math.Round(fontSize * outlineRatio, 1);
+
+        // 行高留 1.7 倍，不然上下两条会粘在一起
+        int laneHeight = (int)Math.Round(fontSize * 1.7);
+
+        var (areaTop, areaBottom) = AreaRange(style.Area, h);
+        int usable = Math.Max(laneHeight, areaBottom - areaTop);
+        int laneCount = Math.Clamp(usable / laneHeight, 1, 8);
+
+        // ASS 的 alpha 是反的：00 完全不透明，FF 全透明
+        int opacity = Math.Clamp(style.Opacity, 10, 100);
+        int alpha = (int)Math.Round((100 - opacity) / 100.0 * 255);
+        string primary = $"&H{alpha:X2}FFFFFF";
+
+        double speed = Math.Clamp(style.SpeedSeconds, 3, 15);
+        long moveMs = (long)(speed * 1000);
 
         var sb = new StringBuilder(64 * 1024);
         sb.AppendLine("[Script Info]");
@@ -68,14 +117,14 @@ public static class DanmakuAss
                       "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, " +
                       "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, " +
                       "MarginL, MarginR, MarginV, Encoding");
-        sb.AppendLine($"Style: DM,Microsoft YaHei,{fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000," +
-                      $"&H64000000,0,0,0,0,100,100,0,0,1,2,1,7,0,0,0,1");
+        sb.AppendLine($"Style: DM,Microsoft YaHei,{fontSize},{primary},{primary},&H00000000," +
+                      $"&H64000000,0,0,0,0,100,100,0,0,1,{outline:0.#},1,7,0,0,0,1");
         sb.AppendLine();
         sb.AppendLine("[Events]");
         sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
 
         // 简单防重叠：每条弹幕挑一个「最近最少用」的轨道
-        var laneFreeAt = new long[LaneCount];
+        var laneFreeAt = new long[laneCount];
 
         foreach (var d in items.OrderBy(x => x.OffsetMs))
         {
@@ -83,15 +132,15 @@ public static class DanmakuAss
             if (text.Length == 0) continue;
 
             int lane = 0;
-            for (int i = 1; i < LaneCount; i++)
+            for (int i = 1; i < laneCount; i++)
                 if (laneFreeAt[i] < laneFreeAt[lane]) lane = i;
 
             // 同一轨道上一条还没走完一半就不许再放，否则会叠在一起
             long startMs = Math.Max(d.OffsetMs, laneFreeAt[lane]);
-            long endMs = startMs + (long)(ScreenSeconds * 1000);
-            laneFreeAt[lane] = startMs + (long)(ScreenSeconds * 1000 / 2);
+            long endMs = startMs + moveMs;
+            laneFreeAt[lane] = startMs + moveMs / 2;
 
-            int y = top + lane * laneHeight;
+            int y = areaTop + lane * laneHeight;
             sb.Append("Dialogue: 0,")
               .Append(Time(startMs)).Append(',')
               .Append(Time(endMs)).Append(",DM,,0,0,0,,")
@@ -102,6 +151,15 @@ public static class DanmakuAss
 
         return sb.ToString();
     }
+
+    /// <summary>各区域对应的纵向可用范围（像素，相对 PlayRes）。</summary>
+    private static (int Top, int Bottom) AreaRange(DanmakuArea area, int h) => area switch
+    {
+        DanmakuArea.Top => (h * 6 / 100, h * 38 / 100),
+        DanmakuArea.Middle => (h * 33 / 100, h * 67 / 100),
+        DanmakuArea.Bottom => (h * 60 / 100, h * 92 / 100),
+        _ => (h * 6 / 100, h * 92 / 100),
+    };
 
     /// <summary>ASS 的时间格式：0:00:07.61</summary>
     private static string Time(long ms)

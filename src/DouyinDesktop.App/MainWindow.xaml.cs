@@ -600,7 +600,9 @@ public partial class MainWindow : Window
         if (_mpv is null) return;
 
         string ass = DanmakuAss.Build(
-            _danmakuItems.Values.ToList(), item.Video?.Width ?? 0, item.Video?.Height ?? 0);
+            _danmakuItems.Values.ToList(),
+            item.Video?.Width ?? 0, item.Video?.Height ?? 0,
+            _settings.ToDanmakuStyle());
 
         string dir = Path.Combine(DouyinPaths.DataDirectory, "danmaku");
         Directory.CreateDirectory(dir);
@@ -1649,8 +1651,14 @@ public partial class MainWindow : Window
         // 设置里可能改了/取消了快捷键，回来要刷新详情页那张表
         RefreshShortcuts();
 
-        // 弹幕开关可能变了，按新设置重来一遍
-        if (_index >= 0 && _index < _items.Count) ResetDanmaku(_items[_index]);
+        // 弹幕开关可能变了：关掉就摘轨道，开着且已有数据就只重排样式（不重新请求）
+        if (_index >= 0 && _index < _items.Count)
+        {
+            var item = _items[_index];
+            if (!_settings.Danmaku || item.IsImagePost) ResetDanmaku(item);
+            else if (_danmakuItems.Count > 0) _ = ApplyDanmakuAsync(item, CancellationToken.None);
+            else ResetDanmaku(item);
+        }
     }
 
     /// <summary>

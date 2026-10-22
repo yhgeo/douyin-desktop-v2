@@ -111,14 +111,22 @@ if (args.Length > 0 && args[0] == "danmaku")
 
         if (p1.Items.Count > 0)
         {
+            var custom = new DouyinDesktop.Core.Models.DanmakuStyle
+            {
+                FontPercent = 5.0,
+                Opacity = 60,
+                OutlineRatio = 0.18,
+                SpeedSeconds = 4,
+                Area = DouyinDesktop.Core.Models.DanmakuArea.Full,
+            };
             string ass = DouyinDesktop.Core.Models.DanmakuAss.Build(
-                p1.Items, item.Video?.Width ?? 1080, item.Video?.Height ?? 1920);
+                p1.Items, item.Video?.Width ?? 1080, item.Video?.Height ?? 1920, custom);
             var lines = ass.Split('\n');
-            Console.WriteLine("  ASS 头部：");
-            foreach (var ln in lines.Take(10)) Console.WriteLine("    " + ln.TrimEnd());
+            Console.WriteLine("  Style 行：");
+            Console.WriteLine("    " + lines.First(x => x.StartsWith("Style:")).TrimEnd());
             Console.WriteLine($"  Dialogue 行数 = {lines.Count(x => x.StartsWith("Dialogue:"))}");
 
-            string outPath = Path.Combine(Path.GetTempPath(), "dm-test.ass");
+            string outPath = Path.Combine(Path.GetTempPath(), "dm-custom.ass");
             File.WriteAllText(outPath, ass);
             Console.WriteLine("  ASS 已写到 " + outPath);
             break;      // 一个作品就够了
