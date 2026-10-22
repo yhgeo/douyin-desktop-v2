@@ -77,12 +77,29 @@
             <!-- 画布子窗口带 WS_EX_TRANSPARENT，点击会落到这层，用来做「点一下暂停」 -->
             <Grid x:Name="VideoHost" Grid.Column="0" Background="Black" SizeChanged="OnVideoHostSizeChanged"
                   MouseLeftButtonUp="OnVideoAreaClick">
+
+                <!-- 底衬：视频/图片铺不满时，用同源画面做一层模糊背景（仿抖音） -->
+                <Grid x:Name="BlurLayer" Background="#0B0B0E">
+                    <Image x:Name="BlurImage" Stretch="UniformToFill" Opacity="0.85"
+                           RenderTransformOrigin="0.5,0.5">
+                        <!-- 放大一点：模糊采样到边界会发虚，放大后边缘被裁掉 -->
+                        <Image.RenderTransform>
+                            <ScaleTransform ScaleX="1.25" ScaleY="1.25" />
+                        </Image.RenderTransform>
+                        <Image.Effect>
+                            <BlurEffect Radius="42" KernelType="Gaussian" RenderingBias="Performance" />
+                        </Image.Effect>
+                    </Image>
+                    <!-- 压暗，不然亮色画面当背景会抢主体 -->
+                    <Rectangle Fill="#59000000" />
+                </Grid>
+
                 <local:VideoSurface x:Name="Surface"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
 
                 <!-- 图集作品：把 Surface 隐藏后用这层显示图片（HwndHost 会盖住 WPF 内容） -->
-                <Grid x:Name="ImageLayer" Visibility="Collapsed" Background="Black">
+                <Grid x:Name="ImageLayer" Visibility="Collapsed" Background="Transparent">
                     <Image x:Name="ImageView" Stretch="Uniform" />
 
                     <!-- 页码放右上角，避免和图片底部的内容打架 -->

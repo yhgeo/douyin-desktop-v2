@@ -69,6 +69,8 @@ public partial class MainWindow : Window
     private bool _authorMode;
     private bool _muted;
     private int _volume = 100;
+    /// <summary>当前作品的宽高比，用来给视频画布定尺寸（留出模糊背景的区域）。</summary>
+    private double _aspect = 9.0 / 16.0;
 
     // ================= 弹幕 =================
     private int _danmakuSubId = -1;
@@ -1355,6 +1357,50 @@ public partial class MainWindow : Window
 
     // ================= 界面 =================
 
+    /// <summary>
+    /// 模糊背景：视频/图片铺不满时，用同源画面铺满并重度模糊（仿抖音的观感）。
+    /// 拿不到就留黑，不影响播放。
+    /// </summary>
+    private async Task UpdateBlurBackgroundAsync(Aweme item, ImageInfo? firstImage)
+    {
+        try
+        {
+            if (firstImage is not null)
+            {
+                byte[] bytes = await GetImageBytesAsync(firstImage);
+                BlurImage.Source = BytesToBitmap(bytes);
+                return;
+            }
+
+            string cover = item.Video?.CoverUrl ?? "";
+            if (cover.Length == 0) { BlurImage.Source = null; return; }
+
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.UriSource = new Uri(cover);
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
+            bmp.EndInit();
+            BlurImage.Source = bmp;
+        }
+        catch
+        {
+            // 封面拿不到（CDN 需要 Referer 之类）就保持黑底，不影响播放
+            BlurImage.Source = null;
+        }
+    }
+
+    private static BitmapImage BytesToBitmap(byte[] bytes)
+    {
+        var bmp = new BitmapImage();
+        bmp.BeginInit();
+        bmp.StreamSource = new MemoryStream(bytes);
+        bmp.CacheOption = BitmapCacheOption.OnLoad;
+        bmp.EndInit();
+        bmp.Freeze();
+        return bmp;
+    }
+
     private void ShowInfo(Aweme item)
     {
         AuthorText.Text = "@" + item.AuthorName;
@@ -1382,6 +1428,16 @@ public partial class MainWindow : Window
             : item.IsImagePost ? "♪ 无背景音乐" : "";
 
         ResetTechStats();
+
+        // 铺不满屏幕时，用同源画面做模糊背景（仿抖音）。
+        // 图集用第一张图，视频用封面——封面本身就是首帧，够用了。
+        var firstImage = item.IsImagePost && item.Images is { Count: > 0 } ? item.Images[0] : null;
+        _aspect = firstImage is { Width: > 0, Height: > 0 }
+            ? (double)firstImage.Width / firstImage.Height
+            : item.Video?.Aspect ?? 9.0 / 16.0;
+
+        _ = UpdateBlurBackgroundAsync(item, firstImage);
+        LayoutVideo();
 
         if (item.IsImagePost && item.Images is { Count: > 0 } imgs0)
         {
@@ -1451,27 +1507,31 @@ public partial class MainWindow : Window
     /// 窗口拉伸时必须是 false，否则拖边框会拖泥带水。
     /// </summary>
     /// <summary>
-    /// 画布**固定铺满**整个视频区，宽高比完全交给 mpv（--keepaspect=yes + --panscan=0）。
+    /// 视频画布按当前作品的宽高比内接在视频区里，剩下的区域露出底下的模糊背景。
     ///
-    /// 以前是「按视频宽高比算画布尺寸」，切换作品时尺寸要变（推荐流里横屏 16:9
-    /// 和竖屏 9:16 是混着的），无论先变还是后变，总有一边会露出上一条画面被挤压的样子。
-    ///
-    /// 现在画布尺寸**永远不变**，mpv 自己在新视频周围画黑边——视觉结果完全一样
-    /// （黑边本来就是黑的），但切换时没有任何重排，跳变从结构上就不存在了。
-    /// 抖音官方播放器也是这个思路：播放器窗口固定，画面在里面适配。
+    /// 以前是让画布铺满、由 mpv 自己画黑边——那样模糊背景就被盖住了。
+    /// 现在改成按比例定尺寸，切换时会有一次尺寸变化，但因为底衬是模糊画面、
+    /// 不是黑边，观感上更像"换了一屏"而不是"画面被挤了一下"。
     /// </summary>
     private void LayoutVideo()
     {
         double w = VideoHost.ActualWidth, h = VideoHost.ActualHeight;
         if (w <= 1 || h <= 1) return;
 
-        // 只在尺寸真的变了才赋值（拖动窗口时避免无谓的 SetWindowPos）
-        if (Math.Abs(Surface.Width - w) < 0.5 && Math.Abs(Surface.Height - h) < 0.5) return;
+        double aspect = _aspect > 0.1 ? _aspect : 9.0 / 16.0;
+        double tw, th;
+        if (w / h > aspect) { th = h; tw = h * aspect; }
+        else { tw = w; th = w / aspect; }
+
+        tw = Math.Max(1, tw);
+        th = Math.Max(1, th);
+
+        if (Math.Abs(Surface.Width - tw) < 0.5 && Math.Abs(Surface.Height - th) < 0.5) return;
 
         Surface.BeginAnimation(FrameworkElement.WidthProperty, null);
         Surface.BeginAnimation(FrameworkElement.HeightProperty, null);
-        Surface.Width = w;
-        Surface.Height = h;
+        Surface.Width = tw;
+        Surface.Height = th;
     }
 
     private void OnVideoHostSizeChanged(object sender, SizeChangedEventArgs e) => LayoutVideo();
