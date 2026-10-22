@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DouyinDesktop.Core;
 using DouyinDesktop.Core.Api;
@@ -69,8 +70,6 @@ public partial class MainWindow : Window
     private bool _authorMode;
     private bool _muted;
     private int _volume = 100;
-    /// <summary>当前作品的宽高比，用来给视频画布定尺寸（留出模糊背景的区域）。</summary>
-    private double _aspect = 9.0 / 16.0;
 
     // ================= 弹幕 =================
     private int _danmakuSubId = -1;
@@ -1358,47 +1357,86 @@ public partial class MainWindow : Window
     // ================= 界面 =================
 
     /// <summary>
-    /// 模糊背景：视频/图片铺不满时，用同源画面铺满并重度模糊（仿抖音的观感）。
-    /// 拿不到就留黑，不影响播放。
+    /// 底衬取画面主色调（不是模糊图——模糊图铺在两边看着很乱）。
+    /// 视频的黑边由 mpv 自己画，所以颜色要同时设给 mpv 的 background-color；
+    /// 图集的留白是 WPF 画的，设给 BackdropRect。
     /// </summary>
-    private async Task UpdateBlurBackgroundAsync(Aweme item, ImageInfo? firstImage)
+    private async Task UpdateBackdropAsync(Aweme item, ImageInfo? firstImage)
     {
         try
         {
-            if (firstImage is not null)
-            {
-                byte[] bytes = await GetImageBytesAsync(firstImage);
-                BlurImage.Source = BytesToBitmap(bytes);
-                return;
-            }
+            byte[]? bytes = firstImage is not null
+                ? await GetImageBytesAsync(firstImage)
+                : await GetBytesAsync(item.Video?.CoverUrl ?? "");
 
-            string cover = item.Video?.CoverUrl ?? "";
-            if (cover.Length == 0) { BlurImage.Source = null; return; }
+            if (bytes is null || bytes.Length == 0) return;
 
-            var bmp = new BitmapImage();
-            bmp.BeginInit();
-            bmp.UriSource = new Uri(cover);
-            bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
-            bmp.EndInit();
-            BlurImage.Source = bmp;
+            var c = Darken(AverageColor(bytes), 0.34);
+            BackdropRect.Fill = new SolidColorBrush(c);
+
+            if (_mpv is not null && !item.IsImagePost)
+                await _mpv.SetBackgroundColorAsync($"#{c.R:X2}{c.G:X2}{c.B:X2}");
         }
         catch
         {
-            // 封面拿不到（CDN 需要 Referer 之类）就保持黑底，不影响播放
-            BlurImage.Source = null;
+            // 取色失败就保持深灰底，不影响播放
         }
     }
 
-    private static BitmapImage BytesToBitmap(byte[] bytes)
+    private async Task<byte[]?> GetBytesAsync(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return null;
+        if (_imageCache.TryGetValue(url, out var cached)) return cached;
+
+        try
+        {
+            using var resp = await _imageHttp.GetAsync(url);
+            if (!resp.IsSuccessStatusCode) return null;
+            byte[] bytes = await resp.Content.ReadAsByteArrayAsync();
+            if (bytes.Length == 0) return null;
+            if (_imageCache.Count > 60) _imageCache.Clear();
+            _imageCache[url] = bytes;
+            return bytes;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>缩到 8px 取平均色。够代表整体色调，又不会被局部亮块带偏。</summary>
+    private static Color AverageColor(byte[] bytes)
     {
         var bmp = new BitmapImage();
         bmp.BeginInit();
         bmp.StreamSource = new MemoryStream(bytes);
+        bmp.DecodePixelWidth = 8;
         bmp.CacheOption = BitmapCacheOption.OnLoad;
         bmp.EndInit();
-        bmp.Freeze();
-        return bmp;
+
+        var conv = new FormatConvertedBitmap(bmp, PixelFormats.Bgra32, null, 0);
+        int w = conv.PixelWidth, h = conv.PixelHeight;
+        if (w < 1 || h < 1) return Color.FromRgb(11, 11, 14);
+
+        var px = new byte[w * h * 4];
+        conv.CopyPixels(px, w * 4, 0);
+
+        long r = 0, g = 0, b = 0;
+        for (int i = 0; i + 3 < px.Length; i += 4)
+        {
+            b += px[i];
+            g += px[i + 1];
+            r += px[i + 2];
+        }
+
+        int n = Math.Max(1, w * h);
+        return Color.FromRgb((byte)(r / n), (byte)(g / n), (byte)(b / n));
+    }
+
+    private static Color Darken(Color c, double factor)
+    {
+        byte Ch(byte v) => (byte)Math.Clamp(v * factor, 0, 255);
+        return Color.FromRgb(Ch(c.R), Ch(c.G), Ch(c.B));
     }
 
     private void ShowInfo(Aweme item)
@@ -1429,14 +1467,9 @@ public partial class MainWindow : Window
 
         ResetTechStats();
 
-        // 铺不满屏幕时，用同源画面做模糊背景（仿抖音）。
-        // 图集用第一张图，视频用封面——封面本身就是首帧，够用了。
+        // 底衬取画面主色调（视频的黑边交给 mpv 染色，图集的留白是 WPF 这块矩形）
         var firstImage = item.IsImagePost && item.Images is { Count: > 0 } ? item.Images[0] : null;
-        _aspect = firstImage is { Width: > 0, Height: > 0 }
-            ? (double)firstImage.Width / firstImage.Height
-            : item.Video?.Aspect ?? 9.0 / 16.0;
-
-        _ = UpdateBlurBackgroundAsync(item, firstImage);
+        _ = UpdateBackdropAsync(item, firstImage);
         LayoutVideo();
 
         if (item.IsImagePost && item.Images is { Count: > 0 } imgs0)
@@ -1507,31 +1540,25 @@ public partial class MainWindow : Window
     /// 窗口拉伸时必须是 false，否则拖边框会拖泥带水。
     /// </summary>
     /// <summary>
-    /// 视频画布按当前作品的宽高比内接在视频区里，剩下的区域露出底下的模糊背景。
+    /// 画布**固定铺满**整个视频区，宽高比完全交给 mpv（--keepaspect=yes + --panscan=0）。
     ///
-    /// 以前是让画布铺满、由 mpv 自己画黑边——那样模糊背景就被盖住了。
-    /// 现在改成按比例定尺寸，切换时会有一次尺寸变化，但因为底衬是模糊画面、
-    /// 不是黑边，观感上更像"换了一屏"而不是"画面被挤了一下"。
+    /// 不要改回「按宽高比内接」：那样切换作品时尺寸会变（推荐流里横屏 16:9 和
+    /// 竖屏 9:16 混着），无论先变还是后变，总有一边会露出上一条画面被挤压的样子。
+    /// 现在尺寸永远不变，mpv 自己在新视频周围画边——边色由 background-color 决定
+    /// （取画面主色调），所以不是死黑。
     /// </summary>
     private void LayoutVideo()
     {
         double w = VideoHost.ActualWidth, h = VideoHost.ActualHeight;
         if (w <= 1 || h <= 1) return;
 
-        double aspect = _aspect > 0.1 ? _aspect : 9.0 / 16.0;
-        double tw, th;
-        if (w / h > aspect) { th = h; tw = h * aspect; }
-        else { tw = w; th = w / aspect; }
-
-        tw = Math.Max(1, tw);
-        th = Math.Max(1, th);
-
-        if (Math.Abs(Surface.Width - tw) < 0.5 && Math.Abs(Surface.Height - th) < 0.5) return;
+        // 只在尺寸真的变了才赋值（拖动窗口时避免无谓的 SetWindowPos）
+        if (Math.Abs(Surface.Width - w) < 0.5 && Math.Abs(Surface.Height - h) < 0.5) return;
 
         Surface.BeginAnimation(FrameworkElement.WidthProperty, null);
         Surface.BeginAnimation(FrameworkElement.HeightProperty, null);
-        Surface.Width = tw;
-        Surface.Height = th;
+        Surface.Width = w;
+        Surface.Height = h;
     }
 
     private void OnVideoHostSizeChanged(object sender, SizeChangedEventArgs e) => LayoutVideo();

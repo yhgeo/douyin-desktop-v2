@@ -260,6 +260,13 @@ public sealed class MpvController : IAsyncDisposable
 
     public Task SetMuteAsync(bool muted) => _ipc.CommandAsync("set", "mute", Flag(muted));
 
+    /// <summary>
+    /// 视频没铺满时四周那圈边的颜色（letterbox）。
+    /// 默认是死黑，改成画面主色调后观感接近抖音——不用另开窗口画背景。
+    /// </summary>
+    public Task SetBackgroundColorAsync(string hex)
+        => _ipc.CommandAsync("set", "background-color", hex);
+
     // ================= 外挂字幕（弹幕走这条） =================
 
     /// <summary>

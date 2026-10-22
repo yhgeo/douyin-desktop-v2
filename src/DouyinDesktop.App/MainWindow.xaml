@@ -78,21 +78,8 @@
             <Grid x:Name="VideoHost" Grid.Column="0" Background="Black" SizeChanged="OnVideoHostSizeChanged"
                   MouseLeftButtonUp="OnVideoAreaClick">
 
-                <!-- 底衬：视频/图片铺不满时，用同源画面做一层模糊背景（仿抖音） -->
-                <Grid x:Name="BlurLayer" Background="#0B0B0E">
-                    <Image x:Name="BlurImage" Stretch="UniformToFill" Opacity="0.85"
-                           RenderTransformOrigin="0.5,0.5">
-                        <!-- 放大一点：模糊采样到边界会发虚，放大后边缘被裁掉 -->
-                        <Image.RenderTransform>
-                            <ScaleTransform ScaleX="1.25" ScaleY="1.25" />
-                        </Image.RenderTransform>
-                        <Image.Effect>
-                            <BlurEffect Radius="42" KernelType="Gaussian" RenderingBias="Performance" />
-                        </Image.Effect>
-                    </Image>
-                    <!-- 压暗，不然亮色画面当背景会抢主体 -->
-                    <Rectangle Fill="#59000000" />
-                </Grid>
+                <!-- 底衬：取画面的主色调，铺不满时就是这一块颜色（不用模糊图，太乱） -->
+                <Rectangle x:Name="BackdropRect" Fill="#0B0B0E" />
 
                 <local:VideoSurface x:Name="Surface"
                                     HorizontalAlignment="Center"
