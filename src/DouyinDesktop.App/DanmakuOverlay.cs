@@ -144,6 +144,25 @@ public sealed class DanmakuOverlay : Window
 
     private void OnTick(object? sender, EventArgs e)
     {
+        // 浮层出问题绝对不能把整个程序带崩：出错就先忍着，错太多次就自我停用
+        try
+        {
+            Tick();
+        }
+        catch (Exception ex)
+        {
+            if (++_failures < 20) return;
+
+            _timer.Stop();
+            if (IsVisible) Hide();
+            AppLog.Write("弹幕浮层已停用：" + ex);
+        }
+    }
+
+    private int _failures;
+
+    private void Tick()
+    {
         if (_target.ActualWidth < 8 || _target.ActualHeight < 8) return;
 
         SyncBounds();
@@ -305,7 +324,18 @@ public sealed class DanmakuOverlay : Window
 
     private void SyncBounds()
     {
-        if (_owner.WindowState == WindowState.Minimized) return;
+        // 主窗口最小化、或者不是活动窗口时（比如打开了设置对话框、切到别的程序）
+        // 就藏起来。不藏的话全屏时浮层是 topmost，会盖在设置窗口上面。
+        if (_owner.WindowState == WindowState.Minimized || !_owner.IsActive)
+        {
+            if (IsVisible) Hide();
+            return;
+        }
+        if (!IsVisible && _items.Count > 0) Show();
+
+        // 主窗口全屏时会设 Topmost=true，浮层不同步就会被压到它下面 —— 表现就是"全屏后弹幕消失"
+        if (Topmost != _owner.Topmost) Topmost = _owner.Topmost;
+
         if (_target.ActualHeight < 8) return;
 
         var (bandTop, bandHeight) = Band();
