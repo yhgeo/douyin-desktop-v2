@@ -64,6 +64,14 @@ public partial class SettingsWindow : Window
         if (!_danmakuLoading) DanmakuOptions.IsEnabled = _settings.Danmaku;
     }
 
+    private void OnOverlayRendererChanged(object sender, RoutedEventArgs e)
+    {
+        if (_danmakuLoading) return;
+
+        _settings.DanmakuRenderer = OverlayCheck.IsChecked == true ? "overlay" : "ass";
+        _settings.Save();
+    }
+
     // ================= 弹幕外观 =================
 
     private bool _danmakuLoading;
@@ -75,6 +83,7 @@ public partial class SettingsWindow : Window
         try
         {
             DanmakuCheck.IsChecked = _settings.Danmaku;
+            OverlayCheck.IsChecked = _settings.DanmakuRenderer == "overlay";
             FontSlider.Value = Math.Clamp(_settings.DanmakuFontPercent, FontSlider.Minimum, FontSlider.Maximum);
             OpacitySlider.Value = Math.Clamp(_settings.DanmakuOpacity, OpacitySlider.Minimum, OpacitySlider.Maximum);
             OutlineSlider.Value = Math.Clamp(_settings.DanmakuOutlinePercent, OutlineSlider.Minimum, OutlineSlider.Maximum);

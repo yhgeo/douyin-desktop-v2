@@ -262,6 +262,15 @@
                                 <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,14,0,0"
                                            TextWrapping="Wrap" LineHeight="18"
                                            Text="只有创作者开启了弹幕的作品才有。弹幕由播放器渲染成字幕轨（视频是独立窗口，界面层盖不上去），所以外观只能是白字黑边、从右往左滚。" />
+
+                                <!-- 渲染方式：默认字幕轨（稳），浮层是实验性的 -->
+                                <CheckBox x:Name="OverlayCheck" Margin="0,12,0,0"
+                                          Content="用浮层渲染（更顺滑，实验性）"
+                                          Foreground="{StaticResource TextBrush}" FontSize="12"
+                                          Checked="OnOverlayRendererChanged" Unchecked="OnOverlayRendererChanged" />
+                                <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,6,0,0"
+                                           TextWrapping="Wrap" LineHeight="18"
+                                           Text="默认用字幕轨，稳定。浮层是按显示器刷新率单独画的，弹幕移动更顺，但窗口层级相关的 bug 多（全屏/设置对话框/多屏），遇到问题就关掉这个。" />
                             </StackPanel>
                         </StackPanel>
                     </Border>

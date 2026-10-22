@@ -219,9 +219,9 @@ public partial class MainWindow : Window
         int saved = _items.FindIndex(x => x.Id == item.Id);
         if (saved < 0) saved = 0;
 
-        // 上次那条已经看过了，往后挪一条——不然每次打开都是同一个视频，
-        // 看着就像"预加载坏了"。挪到末尾就停在末尾。
-        int start = saved + 1 < _items.Count ? saved + 1 : saved;
+        // 索引存错的问题已经在 LastSession 里修掉了（原来是按整表长度夹，
+        // 翻过 30 条后永远读成第 30 条），这里就老老实实接着上次那条播。
+        int start = saved;
 
         var play = _items[start];
         string playUri = play.Video?.PlayAddr?.Uri ?? "";
@@ -675,6 +675,9 @@ public partial class MainWindow : Window
             AppLog.Write($"弹幕浮层：{_danmakuItems.Count} 条 / 区域 {_settings.DanmakuArea}");
             return;
         }
+
+        // 切回字幕轨时，之前开过的浮层要收掉，不然两套叠在一起
+        _overlay?.Clear();
 
         string ass = DanmakuAss.Build(
             _danmakuItems.Values.ToList(),

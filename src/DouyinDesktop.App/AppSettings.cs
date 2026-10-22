@@ -44,10 +44,10 @@ public sealed class AppSettings
 
     /// <summary>
     /// 渲染方式：
-    ///   overlay = 独立透明浮层，按显示器刷新率画（位移小，移动时更清楚）
-    ///   ass     = 交给 mpv 渲染成字幕轨（受视频帧率限制，30fps 时一帧跳 6-7px）
+    ///   ass     = 交给 mpv 渲染成字幕轨（默认，稳定；受视频帧率限制，快速移动时有轻微跳动）
+    ///   overlay = 独立透明浮层，按显示器刷新率画（更顺滑，但窗口层级相关 bug 多）
     /// </summary>
-    public string DanmakuRenderer { get; set; } = "overlay";
+    public string DanmakuRenderer { get; set; } = "ass";
 
     public DouyinDesktop.Core.Models.DanmakuStyle ToDanmakuStyle() => new()
     {

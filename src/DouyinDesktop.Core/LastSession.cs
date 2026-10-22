@@ -33,11 +33,19 @@ public static class LastSession
 
         try
         {
+            // 只存 30 条，但**不能简单 Take(30)**：用户翻到第 45 条时，
+            // 索引会被夹成 29，读回来永远停在第 30 条——
+            // 表现就是"不管切到哪条，每次打开都是同一个视频"。
+            // 正确做法：以当前条为中心截一段，保证当前条一定在里面。
+            int start = Math.Max(0, index - 5);
+            var take = items.Skip(start).Take(MaxItems).ToList();
+            if (take.Count == 0) return;
+
             var snap = new LastSessionSnapshot
             {
                 SavedAt = DateTime.UtcNow,
-                Index = Math.Clamp(index, 0, items.Count - 1),
-                Items = items.Take(MaxItems).ToList(),
+                Index = Math.Clamp(index - start, 0, take.Count - 1),
+                Items = take,
             };
 
             string target = path ?? DouyinPaths.LastSessionFile;
