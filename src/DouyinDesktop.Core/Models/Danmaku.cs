@@ -78,12 +78,19 @@ public static class DanmakuAss
     {
         style ??= DanmakuStyle.Default;
 
-        // PlayRes 跟着视频走，不然竖屏视频里坐标会全错位
+        // PlayRes 不能直接用视频分辨率：小视频（540x960 这种）如果按原尺寸做画布，
+        // libass 会先在小画布上栅格化文字，再被放大到窗口尺寸——静止时就有点糊，
+        // 动起来（\move 每帧重定位）更明显。
+        // 所以画布统一抬到 1080p / 1920 这一档，比这还大的视频才按原尺寸。
         int w = videoWidth > 0 ? videoWidth : 1080;
         int h = videoHeight > 0 ? videoHeight : 1920;
 
+        int baseH = h >= w ? 1920 : 1080;
+        int playH = Math.Max(h, baseH);
+        int playW = (int)Math.Round((double)playH * w / h);
+
         double fontPct = Math.Clamp(style.FontPercent, 1.5, 8.0);
-        int fontSize = Math.Max(12, (int)Math.Round(h * fontPct / 100.0));
+        int fontSize = Math.Max(12, (int)Math.Round(playH * fontPct / 100.0));
 
         double outlineRatio = Math.Clamp(style.OutlineRatio, 0, 0.3);
         double outline = Math.Round(fontSize * outlineRatio, 1);
@@ -91,7 +98,7 @@ public static class DanmakuAss
         // 行高留 1.7 倍，不然上下两条会粘在一起
         int laneHeight = (int)Math.Round(fontSize * 1.7);
 
-        var (areaTop, areaBottom) = AreaRange(style.Area, h);
+        var (areaTop, areaBottom) = AreaRange(style.Area, playH);
         int usable = Math.Max(laneHeight, areaBottom - areaTop);
         int laneCount = Math.Clamp(usable / laneHeight, 1, 8);
 
@@ -103,11 +110,14 @@ public static class DanmakuAss
         double speed = Math.Clamp(style.SpeedSeconds, 3, 15);
         long moveMs = (long)(speed * 1000);
 
+        // 移动速度换算成「像素 / 毫秒」，用来算同一轨道上要隔多久才能放下一条
+        double pxPerMs = (playW * 2.0 + 20) / moveMs;
+
         var sb = new StringBuilder(64 * 1024);
         sb.AppendLine("[Script Info]");
         sb.AppendLine("ScriptType: v4.00+");
-        sb.AppendLine($"PlayResX: {w}");
-        sb.AppendLine($"PlayResY: {h}");
+        sb.AppendLine($"PlayResX: {playW}");
+        sb.AppendLine($"PlayResY: {playH}");
         sb.AppendLine("WrapStyle: 2");          // 不自动换行，弹幕就该一行
         sb.AppendLine("ScaledBorderAndShadow: yes");
         sb.AppendLine("Collisions: None");      // 位置我们自己算，别让 libass 挪
@@ -117,14 +127,17 @@ public static class DanmakuAss
                       "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, " +
                       "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, " +
                       "MarginL, MarginR, MarginV, Encoding");
+        // Shadow 给 0：1px 阴影在缩小显示时只剩半像素，糊成一圈灰晕，
+        // 弹幕一动就像拖影。描边已经足够把白字从画面上分出来了。
         sb.AppendLine($"Style: DM,Microsoft YaHei,{fontSize},{primary},{primary},&H00000000," +
-                      $"&H64000000,0,0,0,0,100,100,0,0,1,{outline:0.#},1,7,0,0,0,1");
+                      $"&H64000000,0,0,0,0,100,100,0,0,1,{outline:0.#},0,7,0,0,0,1");
         sb.AppendLine();
         sb.AppendLine("[Events]");
         sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
 
         // 简单防重叠：每条弹幕挑一个「最近最少用」的轨道
         var laneFreeAt = new long[laneCount];
+        long lastStart = long.MinValue;
 
         foreach (var d in items.OrderBy(x => x.OffsetMs))
         {
@@ -135,16 +148,27 @@ public static class DanmakuAss
             for (int i = 1; i < laneCount; i++)
                 if (laneFreeAt[i] < laneFreeAt[lane]) lane = i;
 
-            // 同一轨道上一条还没走完一半就不许再放，否则会叠在一起
+            // 同一轨道要等上一条走出「自身宽度 + 一点空隙」才能放下一条，
+            // 否则两条会叠着走。
             long startMs = Math.Max(d.OffsetMs, laneFreeAt[lane]);
+
+            // 全局再错开一点：同一秒来一堆弹幕时，如果都按原时间入场，
+            // 屏幕上会像一堵墙一样整块推过来；错开之后就是一条斜着流动的队列。
+            if (lastStart != long.MinValue) startMs = Math.Max(startMs, lastStart + 90);
+
+            // 排得太晚就不要了——弹幕已经过时，硬塞反而挡住画面
+            if (startMs - d.OffsetMs > 4000) continue;
+
             long endMs = startMs + moveMs;
-            laneFreeAt[lane] = startMs + moveMs / 2;
+            double estWidth = EstimateWidth(text, fontSize);
+            laneFreeAt[lane] = startMs + (long)((estWidth + fontSize * 1.2) / pxPerMs);
+            lastStart = startMs;
 
             int y = areaTop + lane * laneHeight;
             sb.Append("Dialogue: 0,")
               .Append(Time(startMs)).Append(',')
               .Append(Time(endMs)).Append(",DM,,0,0,0,,")
-              .Append($"{{\\move({w + 20},{y},{-w},{y})}}")
+              .Append($"{{\\move({playW + 20},{y},{-playW},{y})}}")
               .Append(text)
               .AppendLine();
         }
@@ -152,13 +176,25 @@ public static class DanmakuAss
         return sb.ToString();
     }
 
+    /// <summary>
+    /// 估个宽度，只用来决定同轨道隔多久放下一条。
+    /// 中日韩字符按一个字宽算，其它（字母/数字/标点）按半个算——够用了。
+    /// </summary>
+    private static double EstimateWidth(string text, int fontSize)
+    {
+        double units = 0;
+        foreach (char c in text) units += c < 0x2E80 ? 0.55 : 1.0;
+        return Math.Max(units, 1) * fontSize;
+    }
+
     /// <summary>各区域对应的纵向可用范围（像素，相对 PlayRes）。</summary>
     private static (int Top, int Bottom) AreaRange(DanmakuArea area, int h) => area switch
     {
-        DanmakuArea.Top => (h * 6 / 100, h * 38 / 100),
-        DanmakuArea.Middle => (h * 33 / 100, h * 67 / 100),
-        DanmakuArea.Bottom => (h * 60 / 100, h * 92 / 100),
-        _ => (h * 6 / 100, h * 92 / 100),
+        // 顶部 = 画面上方五分之一
+        DanmakuArea.Top => (h * 2 / 100, h * 20 / 100),
+        DanmakuArea.Middle => (h * 40 / 100, h * 62 / 100),
+        DanmakuArea.Bottom => (h * 78 / 100, h * 97 / 100),
+        _ => (h * 2 / 100, h * 97 / 100),
     };
 
     /// <summary>ASS 的时间格式：0:00:07.61</summary>
