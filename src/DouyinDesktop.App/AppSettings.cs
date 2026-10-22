@@ -42,6 +42,13 @@ public sealed class AppSettings
     /// <summary>显示区域：top / middle / bottom / full。</summary>
     public string DanmakuArea { get; set; } = "top";
 
+    /// <summary>
+    /// 渲染方式：
+    ///   overlay = 独立透明浮层，按显示器刷新率画（位移小，移动时更清楚）
+    ///   ass     = 交给 mpv 渲染成字幕轨（受视频帧率限制，30fps 时一帧跳 6-7px）
+    /// </summary>
+    public string DanmakuRenderer { get; set; } = "overlay";
+
     public DouyinDesktop.Core.Models.DanmakuStyle ToDanmakuStyle() => new()
     {
         FontPercent = DanmakuFontPercent,

@@ -72,6 +72,7 @@ public partial class MainWindow : Window
 
     // ================= 弹幕 =================
     private int _danmakuSubId = -1;
+    private DanmakuOverlay? _overlay;
     private string _danmakuAwemeId = "";
     private string? _danmakuAssPath;
     private long _danmakuLoadedTo;          // 已经拉到第几毫秒
@@ -162,6 +163,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 调试用：--aweme=<id> 只播这一条（验证弹幕这类要看特定作品的场景）
+        string? awemeArg = Environment.GetCommandLineArgs()
+            .FirstOrDefault(a => a.StartsWith("--aweme=", StringComparison.Ordinal));
+        if (awemeArg is not null)
+        {
+            _ = LoadSingleAwemeAsync(awemeArg["--aweme=".Length..]);
+            return;
+        }
+
         // 先试着接着上次看：一次请求都不用，直接开播。
         // 恢复这条路再出问题也不能影响启动——兜底就是老老实实拉推荐。
         bool restored = false;
@@ -224,6 +234,28 @@ public partial class MainWindow : Window
 
         await PlayIndexAsync(_index, force: true);
         return true;
+    }
+
+    /// <summary>
+    /// 调试入口：--aweme=&lt;id&gt; 只播这一条。
+    /// 验证弹幕这类要看特定作品的场景时用，不然每次首条都是随机推荐。
+    /// </summary>
+    private async Task LoadSingleAwemeAsync(string awemeId)
+    {
+        SetStatus("正在取作品 " + awemeId + "…");
+        var item = await _client.GetAwemeDetailAsync(awemeId);
+        if (item is null)
+        {
+            SetStatus("取作品失败：" + awemeId);
+            return;
+        }
+
+        _items.Clear();
+        _presented.Clear();
+        _items.Add(item);
+        _index = 0;
+        AppLog.Write($"单条调试：{awemeId} @{item.AuthorName}");
+        await PlayIndexAsync(0, force: true);
     }
 
     /// <summary>
@@ -550,11 +582,17 @@ public partial class MainWindow : Window
         _danmakuSubId = -1;
         if (old >= 0) _ = RemoveSubtitleQuietlyAsync(old);
 
+        _overlay?.Clear();
+
         if (!_settings.Danmaku || item.IsImagePost) return;
 
         var cts = new CancellationTokenSource();
         _danmakuCts = cts;
-        _ = PumpDanmakuAsync(item, cts.Token);
+
+        // 上一条的拉取任务可能还在收尾，它会把 _danmakuBusy 占着，
+        // 新的这条就会直接 return —— 所以这里先清掉
+        _danmakuBusy = false;
+        _ = PumpDanmakuAsync(item, cts);
     }
 
     private async Task RemoveSubtitleQuietlyAsync(int id)
@@ -567,10 +605,11 @@ public partial class MainWindow : Window
     /// 一次拉一个 32 秒窗口，始终保持比播放位置超前 64 秒。
     /// 接口是分段返回的，只能边播边拉，不能一次要全部。
     /// </summary>
-    private async Task PumpDanmakuAsync(Aweme item, CancellationToken ct)
+    private async Task PumpDanmakuAsync(Aweme item, CancellationTokenSource cts)
     {
         if (_danmakuBusy) return;
         _danmakuBusy = true;
+        var ct = cts.Token;
         try
         {
             while (!ct.IsCancellationRequested)
@@ -591,18 +630,46 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { AppLog.Write("弹幕失败：" + ex.Message); }
-        finally { _danmakuBusy = false; }
+        finally
+        {
+            // 只有「还是当前这一轮」才解锁，避免旧任务把新任务的闸门打开
+            if (ReferenceEquals(cts, _danmakuCts)) _danmakuBusy = false;
+        }
     }
 
-    /// <summary>把攒到的弹幕写成 ASS，挂到 mpv 上（首次挂轨，之后只重载文件）。</summary>
+    /// <summary>把攒到的弹幕写到画面上：默认走浮层，也可以切回 mpv 字幕轨。</summary>
     private async Task ApplyDanmakuAsync(Aweme item, CancellationToken ct)
     {
         if (_mpv is null) return;
 
+        var style = _settings.ToDanmakuStyle();
+
+        if (_settings.DanmakuRenderer == "overlay")
+        {
+            if (_overlay is null)
+            {
+                _overlay = new DanmakuOverlay(this, VideoHost,
+                    () => _mpv?.Position ?? 0,
+                    () => _mpv?.IsPaused ?? false);
+                _overlay.Show();
+            }
+
+            // 浮层接管后，字幕轨那条路要清干净，否则两套会叠在一起
+            int old = _danmakuSubId;
+            _danmakuSubId = -1;
+            _danmakuAssPath = null;
+            if (old >= 0) await RemoveSubtitleQuietlyAsync(old);
+
+            _overlay.SetStyle(style);
+            _overlay.SetItems(_danmakuItems.Values);
+            AppLog.Write($"弹幕浮层：{_danmakuItems.Count} 条 / 区域 {_settings.DanmakuArea}");
+            return;
+        }
+
         string ass = DanmakuAss.Build(
             _danmakuItems.Values.ToList(),
             item.Video?.Width ?? 0, item.Video?.Height ?? 0,
-            _settings.ToDanmakuStyle());
+            style);
 
         string dir = Path.Combine(DouyinPaths.DataDirectory, "danmaku");
         Directory.CreateDirectory(dir);
@@ -1263,7 +1330,7 @@ public partial class MainWindow : Window
                 && _items[_index].Id == _danmakuAwemeId
                 && (long)(pos * 1000) + 32_000 > _danmakuLoadedTo)
             {
-                _ = PumpDanmakuAsync(_items[_index], cts.Token);
+                _ = PumpDanmakuAsync(_items[_index], cts);
             }
         });
     }
@@ -1746,6 +1813,8 @@ public partial class MainWindow : Window
     private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         _prefetchCts?.Cancel();
+        _danmakuCts?.Cancel();
+        try { _overlay?.Close(); } catch { /* 已经关了 */ }
 
         // 退出前把现场存准（绕过 2 秒节流）
         if (!_authorMode && !_followMode && _items.Count > 0 && _index >= 0)
