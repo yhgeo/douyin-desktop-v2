@@ -250,7 +250,7 @@
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="移动速度" FontSize="12" Foreground="#8C8C99"
                                                VerticalAlignment="Center" />
-                                    <Slider x:Name="SpeedSlider" Grid.Column="1" Minimum="3" Maximum="15"
+                                    <Slider x:Name="SpeedSlider" Grid.Column="1" Minimum="4" Maximum="20"
                                             TickFrequency="0.5" IsSnapToTickEnabled="True"
                                             Style="{StaticResource DarkSlider}"
                                             ValueChanged="OnDanmakuStyleChanged" />

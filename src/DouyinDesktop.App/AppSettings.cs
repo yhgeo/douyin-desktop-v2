@@ -36,8 +36,8 @@ public sealed class AppSettings
     /// <summary>描边宽度，占字号的百分比（0 = 不描边）。</summary>
     public double DanmakuOutlinePercent { get; set; } = 10;
 
-    /// <summary>一条弹幕从进入到完全离开用几秒。</summary>
-    public double DanmakuSpeed { get; set; } = 8;
+    /// <summary>一条弹幕从进入到完全离开用几秒（4 - 20）。</summary>
+    public double DanmakuSpeed { get; set; } = 10;
 
     /// <summary>显示区域：top / middle / bottom / full。</summary>
     public string DanmakuArea { get; set; } = "top";

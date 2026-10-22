@@ -51,8 +51,14 @@ public sealed record DanmakuStyle
     /// <summary>描边宽度（相对字号的比例，0 = 不描边）。</summary>
     public double OutlineRatio { get; init; } = 0.10;
 
-    /// <summary>一条弹幕从进入画面到完全离开用几秒（3 - 15）。</summary>
-    public double SpeedSeconds { get; init; } = 8;
+    /// <summary>
+    /// 一条弹幕从进入到完全离开用几秒（4 - 20）。
+    ///
+    /// 下限不能太低：libass 对移动中的字幕是**逐帧按亚像素重新排版**的，
+    /// 一帧位移越大，字符边缘的抖动越明显，看起来就像糊了一层。
+    /// 实测 3 秒（一帧要挪近 40px）会明显发虚，8 秒以上就稳了。
+    /// </summary>
+    public double SpeedSeconds { get; init; } = 10;
 
     public DanmakuArea Area { get; init; } = DanmakuArea.Top;
 
@@ -107,7 +113,7 @@ public static class DanmakuAss
         int alpha = (int)Math.Round((100 - opacity) / 100.0 * 255);
         string primary = $"&H{alpha:X2}FFFFFF";
 
-        double speed = Math.Clamp(style.SpeedSeconds, 3, 15);
+        double speed = Math.Clamp(style.SpeedSeconds, 4, 20);
         long moveMs = (long)(speed * 1000);
 
         // 移动速度换算成「像素 / 毫秒」，用来算同一轨道上要隔多久才能放下一条
