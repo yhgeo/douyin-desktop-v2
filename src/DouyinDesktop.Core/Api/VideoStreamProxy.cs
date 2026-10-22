@@ -35,14 +35,16 @@ public sealed class VideoStreamProxy : IAsyncDisposable
     private readonly Task _acceptLoop;
     private readonly int _prefetchBytes;
     private readonly string _userAgent;
+    private readonly PrefetchCache? _cache;
     private bool _disposed;
 
     public int Port { get; }
 
-    private VideoStreamProxy(int prefetchBytes, string userAgent)
+    private VideoStreamProxy(int prefetchBytes, string userAgent, PrefetchCache? cache)
     {
         _prefetchBytes = prefetchBytes;
         _userAgent = userAgent;
+        _cache = cache;
 
         // 端口传 0 让系统分配，绑完之后再读回来——否则 UrlFor 会拼出 :0
         _listener = new TcpListener(IPAddress.Loopback, 0);
@@ -61,8 +63,9 @@ public sealed class VideoStreamProxy : IAsyncDisposable
         _acceptLoop = Task.Run(AcceptLoopAsync);
     }
 
-    public static VideoStreamProxy Start(int prefetchBytes = DefaultPrefetchBytes, string? userAgent = null)
-        => new(prefetchBytes, userAgent ?? DeviceProfile.DefaultUserAgent);
+    public static VideoStreamProxy Start(
+        int prefetchBytes = DefaultPrefetchBytes, string? userAgent = null, PrefetchCache? cache = null)
+        => new(prefetchBytes, userAgent ?? DeviceProfile.DefaultUserAgent, cache);
 
     /// <summary>给 mpv 播的本地地址。uri 必须一起带上——代理第一次见到它时才知道去哪拉。</summary>
     public string UrlFor(Aweme item)
@@ -126,6 +129,9 @@ public sealed class VideoStreamProxy : IAsyncDisposable
 
         entry.Head = ms.ToArray();
         entry.HeadLength = entry.Head.Length;
+
+        // 顺手落盘：下次启动还能用（磁盘缓存自带容量/条数/过期上限）
+        _cache?.Save(entry.AwemeId, entry.SourceUrl, entry.Head, entry.TotalLength, entry.ContentType);
     }
 
     // ================= 请求处理 =================
@@ -384,7 +390,25 @@ public sealed class VideoStreamProxy : IAsyncDisposable
     private StreamEntry GetOrCreate(string id, string sourceUrl)
     {
         TrimEntries();
-        return _entries.GetOrAdd(id, _ => new StreamEntry(sourceUrl));
+        return _entries.GetOrAdd(id, _ => CreateEntry(id, sourceUrl));
+    }
+
+    /// <summary>
+    /// 新建缓存条目。如果磁盘上有上次留下的开头段，直接装进内存——
+    /// 这就是「上次预取过、这次一开机就能秒开」的来源。
+    /// </summary>
+    private StreamEntry CreateEntry(string id, string sourceUrl)
+    {
+        var entry = new StreamEntry(id, sourceUrl);
+
+        if (_cache is null) return entry;
+        if (!_cache.TryLoad(id, sourceUrl, out var cached)) return entry;
+
+        entry.Head = cached.Data;
+        entry.HeadLength = cached.Data.Length;
+        entry.TotalLength = cached.TotalLength;
+        if (!string.IsNullOrEmpty(cached.ContentType)) entry.ContentType = cached.ContentType;
+        return entry;
     }
 
     private void TrimEntries()
@@ -415,8 +439,9 @@ public sealed class VideoStreamProxy : IAsyncDisposable
         _entries.Clear();
     }
 
-    private sealed class StreamEntry(string sourceUrl)
+    private sealed class StreamEntry(string awemeId, string sourceUrl)
     {
+        public string AwemeId { get; } = awemeId;
         public string SourceUrl { get; } = sourceUrl;
         public byte[] Head { get; set; } = Array.Empty<byte>();
         public int HeadLength { get; set; }

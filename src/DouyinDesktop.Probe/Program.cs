@@ -1,3 +1,4 @@
+using DouyinDesktop.Core;
 using DouyinDesktop.Core.Api;
 
 // 数据层验证探针：只依赖 Core，不写任何硬编码凭据。
@@ -6,6 +7,83 @@ using DouyinDesktop.Core.Api;
 // 判定标准：能自己拿到凭据 → 能取到推荐流 → 能换出可播放的 MP4 字节。
 //
 // 评论接口单独验证：dotnet run --project src/DouyinDesktop.Probe -- comment
+
+// 磁盘预取缓存的离线自测：dotnet run --project src/DouyinDesktop.Probe -- cache
+// 不联网、不弹窗，只验证读写 / 换流拒绝 / 容量清理
+if (args.Length > 0 && args[0] == "cache")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    string dir = Path.Combine(Path.GetTempPath(), "dy-prefetch-" + Guid.NewGuid().ToString("N")[..8]);
+    Directory.CreateDirectory(dir);
+    Console.WriteLine($"临时目录 {dir}");
+
+    var cache = PrefetchCache.TryOpen(dir, maxBytes: 3 * 1024 * 1024, maxEntries: 5);
+    if (cache is null) { Console.WriteLine("TryOpen 返回 null，失败"); return 1; }
+
+    const string url = "https://v3-web.douyinvod.com/abc/video.mp4?a=1&u=token1";
+    byte[] data = new byte[1024 * 1024];
+    for (int i = 0; i < data.Length; i++) data[i] = (byte)(i % 251);
+
+    cache.Save("111", url, data, 20_000_000, "video/mp4");
+    bool ok = cache.TryLoad("111", url, out var got);
+    Console.WriteLine($"[1] 读回={ok} 长度={got.Data.Length} 字节一致={got.Data.AsSpan().SequenceEqual(data)} 总长={got.TotalLength}");
+
+    bool ok2 = cache.TryLoad("111", "https://other-cdn.douyinvod.com/abc/video.mp4?u=token2", out _);
+    Console.WriteLine($"[2] 同路径换 host/query -> {ok2}（期望 True）");
+
+    bool ok3 = cache.TryLoad("111", "https://v3-web.douyinvod.com/xyz/other.mp4?u=token1", out _);
+    Console.WriteLine($"[3] 换路径（换了流）-> {ok3}（期望 False）");
+
+    for (int i = 0; i < 10; i++) cache.Save($"9{i:00}", url, data, 1000, "video/mp4");
+    cache.Trim();
+    var (count, bytes) = cache.Stats();
+    Console.WriteLine($"[4] 清理后 {count} 条 / {bytes / 1024.0 / 1024.0:0.0} MB（上限 3MB、5 条）");
+
+    Console.WriteLine($"[5] 不存在的 id -> {cache.TryLoad("nope", url, out _)}（期望 False）");
+
+    Directory.Delete(dir, true);
+    Console.WriteLine("已清理临时目录");
+    return 0;
+}
+
+// 「接着上次看」的现场存取自测：dotnet run --project src/DouyinDesktop.Probe -- session
+// 拉一批真实数据，存盘再读回，逐字段比对
+if (args.Length > 0 && args[0] == "session")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var cs = DouyinClient.Create();
+    cs.Log += m => Console.WriteLine("    " + m);
+
+    var f = await cs.GetFeedAsync(5);
+    if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
+
+    string tmp = Path.Combine(Path.GetTempPath(), "dy-session-" + Guid.NewGuid().ToString("N")[..8] + ".json");
+    LastSession.Save(2, f.Items, tmp);
+
+    var loaded = LastSession.Load(path: tmp);
+    if (loaded is null) { Console.WriteLine("读回失败"); File.Delete(tmp); return 1; }
+
+    Console.WriteLine($"存 {f.Items.Count} 条 -> 读回 {loaded.Items.Count} 条，index={loaded.Index}");
+    int same = 0;
+    for (int i = 0; i < Math.Min(5, loaded.Items.Count); i++)
+    {
+        var a = loaded.Items[i];
+        var b = f.Items[i];
+        bool ok = a.Id == b.Id
+                  && a.Desc == b.Desc
+                  && a.Video?.PlayAddr?.Uri == b.Video?.PlayAddr?.Uri
+                  && a.Author?.Nickname == b.Author?.Nickname
+                  && a.Statistics?.DiggCount == b.Statistics?.DiggCount
+                  && a.IsImagePost == b.IsImagePost
+                  && a.Music?.Title == b.Music?.Title;
+        if (ok) same++;
+        Console.WriteLine($"  [{i}] 一致={ok} id={a.Id} 作者={a.Author?.Nickname} 播放地址长度={a.Video?.PlayAddr?.Uri?.Length ?? 0}");
+    }
+    Console.WriteLine($"逐字段一致 {same}/{Math.Min(5, loaded.Items.Count)}");
+    Console.WriteLine($"文件 {new FileInfo(tmp).Length / 1024} KB");
+    File.Delete(tmp);
+    return same == Math.Min(5, loaded.Items.Count) ? 0 : 1;
+}
 
 if (args.Length > 0 && args[0] == "comment")
 {

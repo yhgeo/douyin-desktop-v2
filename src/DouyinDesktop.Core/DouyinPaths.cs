@@ -16,6 +16,12 @@ public static class DouyinPaths
     public static string WebViewDirectory => Path.Combine(DataDirectory, "WebView2");
     public static string WebViewDiagnoseDirectory => Path.Combine(DataDirectory, "WebView2-Diagnose");
 
+    /// <summary>预取片段的磁盘缓存。删掉只是下次重新预取，不影响登录态。</summary>
+    public static string PrefetchDirectory => Path.Combine(DataDirectory, "prefetch");
+
+    /// <summary>上次看到哪了（列表 + 位置），用于下次启动接着看。GZip 过的 JSON。</summary>
+    public static string LastSessionFile => Path.Combine(DataDirectory, "last-session.dat");
+
     private static string Resolve()
     {
         string portable = Path.Combine(AppContext.BaseDirectory, "data");

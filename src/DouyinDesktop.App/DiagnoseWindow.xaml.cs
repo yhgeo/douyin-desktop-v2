@@ -80,6 +80,14 @@ public partial class DiagnoseWindow : Window
             if (!root.TryGetProperty("response", out var response)) return;
             string url = response.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
 
+            // 弹幕接口前缀不确定（可能在 /aweme/v1/web/ 之外），单独捞一遍。
+            // 用法：--diagnose 打开网页版，点一条**带弹幕**的视频，看日志里有没有候选。
+            if (url.Contains("danmaku", StringComparison.OrdinalIgnoreCase) ||
+                url.Contains("danmu", StringComparison.OrdinalIgnoreCase))
+            {
+                AppLog.Write("弹幕接口候选：" + url.Split('?')[0]);
+            }
+
             // 不再只盯 feed：用户肉眼能看到图集但 feed 里没有，说明图集来自别的接口
             if (!url.Contains("/aweme/v1/web/")) return;
 

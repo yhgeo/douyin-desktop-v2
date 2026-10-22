@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
+using DouyinDesktop.Core;
 using DouyinDesktop.Core.Api;
 using DouyinDesktop.Core.Models;
 using DouyinDesktop.Player;
@@ -14,7 +15,12 @@ namespace DouyinDesktop.App;
 public partial class MainWindow : Window
 {
     private readonly DouyinClient _client = DouyinClient.Create();
-    private readonly VideoStreamProxy _proxy = VideoStreamProxy.Start();
+    private readonly VideoStreamProxy _proxy = VideoStreamProxy.Start(cache: PrefetchCache.TryOpen());
+
+    /// <summary>这次启动是「接着上次看」恢复出来的，还没成功播过一条。</summary>
+    private bool _restoredSession;
+    private DateTime _lastSessionSave = DateTime.MinValue;
+    private int _sessionSaving;
     private readonly KeyMap _keyMap = KeyMap.Load();
     private readonly AppSettings _settings = AppSettings.Load();
     /// <summary>
@@ -64,6 +70,8 @@ public partial class MainWindow : Window
     private bool _muted;
     private int _volume = 100;
     private double _aspect = 9.0 / 16.0;
+    /// <summary>视频还没 file-loaded，先别按新宽高比重排画布。</summary>
+    private bool _layoutAfterLoad;
 
     private readonly Stopwatch _switchTimer = new();
     private readonly List<string> _statusLines = new();
@@ -148,9 +156,68 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 先试着接着上次看：一次请求都不用，直接开播。
+        // 恢复这条路再出问题也不能影响启动——兜底就是老老实实拉推荐。
+        bool restored = false;
+        try
+        {
+            restored = await TryRestoreLastSessionAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("恢复上次失败：" + ex.Message);
+            LastSession.Clear();
+        }
+        if (restored) return;
+
         // 播放器和推荐流并行准备：谁先好都不等谁
         _ = LoadFeedAsync();
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 恢复上次退出时的现场：列表 + 位置 + 那条视频。
+    ///
+    /// 两个前提：
+    ///   1. 保存时间在 48 小时内（再久推荐内容就太陈旧了）
+    ///   2. 存下来的播放地址**还有效**——抖音的播放地址带鉴权参数，过几小时会失效。
+    ///      这里用一个 1KB 的 Range 请求探一下，失效就老老实实重新拉推荐。
+    ///
+    /// 恢复成功后不主动拉新推荐：列表里还有几十条，够看一阵。
+    /// 等翻到快见底时 EnsureBuffer 会自动补新的一批，不用额外逻辑。
+    /// </summary>
+    private async Task<bool> TryRestoreLastSessionAsync()
+    {
+        var snap = LastSession.Load();
+        if (snap is null) return false;
+
+        int idx = Math.Clamp(snap.Index, 0, snap.Items.Count - 1);
+        var item = snap.Items[idx];
+        string uri = item.Video?.PlayAddr?.Uri ?? "";
+        if (uri.Length == 0) return false;
+
+        SetStatus("接着上次继续…");
+        var probe = await _client.ProbeStreamAsync(uri);
+        if (!probe.Ok)
+        {
+            AppLog.Write($"上次的播放地址已失效（{probe.Detail}），重新拉推荐");
+            LastSession.Clear();
+            return false;
+        }
+
+        _items.Clear();
+        _presented.Clear();
+        foreach (var a in snap.Items)
+            if (_presented.Add(a.Id)) _items.Add(a);
+
+        _index = _items.FindIndex(x => x.Id == item.Id);
+        if (_index < 0) _index = 0;
+
+        _restoredSession = true;
+        AppLog.Write($"接着上次：{_items.Count} 条，第 {_index + 1} 条，探活 {probe.ElapsedMs}ms");
+
+        await PlayIndexAsync(_index, force: true);
+        return true;
     }
 
     /// <summary>
@@ -444,6 +511,20 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 退出作者流：回推荐流 + 右侧切回「详情」页。
+    /// U 和 Esc 共用——U 是开关，Esc 是"退一层"的直觉操作。
+    /// 推荐流走缓存，不重新请求，位置还是离开时那一条。
+    /// </summary>
+    private async Task LeaveAuthorAsync()
+    {
+        _authorMode = false;
+        _followMode = false;
+        await SwitchFeedAsync(_recommendFeed, "推荐");
+        SwitchTab(SideTab.Detail);
+        SetStatus("已回到推荐");
+    }
+
+    /// <summary>
     /// 缓冲区快见底时补货。
     /// 留 6 条的余量而不是 3 条：拉一批要 2 秒多，余量太小的话
     /// 用户切到末尾时会干等，表现为"播到第 11 个又要重新加载"。
@@ -509,6 +590,7 @@ public partial class MainWindow : Window
             UpdateIndexLabel();
             PrefetchAround(index);
             EnsureBuffer();
+            SaveSessionIfNeeded();
             return;
         }
 
@@ -548,11 +630,46 @@ public partial class MainWindow : Window
         {
             SetStatus("加载失败：" + ex.Message);
         }
+        finally
+        {
+            // 新画面到位了再调尺寸，避免上一条画面被挤一下
+            if (_layoutAfterLoad)
+            {
+                _layoutAfterLoad = false;
+                LayoutVideo(animate: true);
+            }
+        }
 
         _lastFromCache = _proxy.HasPrefetch(item.Id);
         PrefetchAround(index);
         UpdateIndexLabel();
         EnsureBuffer();
+        SaveSessionIfNeeded();
+    }
+
+    /// <summary>
+    /// 把当前现场存下来，下次启动接着看。
+    /// 只记推荐流（关注/作者流是临时的，下次也没法原样恢复），
+    /// 2 秒内只写一次——连按切换时不必每条都落盘。
+    /// </summary>
+    private void SaveSessionIfNeeded()
+    {
+        if (_authorMode || _followMode) return;
+        if (_index < 0 || _items.Count == 0) return;
+        if ((DateTime.UtcNow - _lastSessionSave).TotalSeconds < 2) return;
+
+        // 已经在写了就别排第二个（序列化 30 条要几毫秒，扔后台线程不挡切换）
+        if (Interlocked.Exchange(ref _sessionSaving, 1) == 1) return;
+
+        _lastSessionSave = DateTime.UtcNow;
+        int idx = _index;
+        var snapshot = _items.ToList();     // 快照：后台线程不能读正在变的列表
+
+        _ = Task.Run(() =>
+        {
+            try { LastSession.Save(idx, snapshot); }
+            finally { Interlocked.Exchange(ref _sessionSaving, 0); }
+        });
     }
 
     // ================= 评论 =================
@@ -620,8 +737,6 @@ public partial class MainWindow : Window
             foreach (var c in page.Comments) _commentVms.Add(new CommentVm(c));
             _commentCursor = page.Cursor;
             _commentsHasMore = page.HasMore;
-
-            TabComments.Content = page.Total > 0 ? $"评论 {Count(page.Total)}" : "评论";
 
             if (_commentVms.Count == 0)
             {
@@ -993,6 +1108,7 @@ public partial class MainWindow : Window
         long ms = _switchTimer.IsRunning ? _switchTimer.ElapsedMilliseconds : 0;
         _switchTimer.Stop();
         _consecutiveFailures = 0;
+        _restoredSession = false;      // 恢复的那条播起来了，之后就不算"恢复中"了
         string source = _lastFromCache ? "已预取" : "网络";
         Dispatcher.BeginInvoke(() =>
             SetStatus(ms > 0 ? $"已加载（{source}），耗时 {ms}ms" : "已加载"));
@@ -1013,6 +1129,16 @@ public partial class MainWindow : Window
             string id = _index >= 0 && _index < _items.Count ? _items[_index].Id : "?";
             AppLog.Write($"加载失败 #{_consecutiveFailures} {id}: {reason}");
             SetStatus($"加载失败：{reason}");
+
+            // 恢复出来的第一条就播不动：多半是整批地址都过期了，直接换一批新的
+            if (_restoredSession)
+            {
+                _restoredSession = false;
+                AppLog.Write("恢复的地址整批失效，重新拉推荐");
+                SetStatus("上次的地址失效了，重新拉推荐…");
+                await LoadFeedAsync(reset: true);
+                return;
+            }
 
             // 一条失败就跳过没问题；连续失败说明网络或凭据出了状况，继续跳只会刷完整个列表
             if (_consecutiveFailures >= 3)
@@ -1092,9 +1218,7 @@ public partial class MainWindow : Window
             TechBitrate.Text = FormatBitrate(_apiBitrate);
         }
 
-        // 评论数先用作品自带的统计值，点进评论页后再用接口返回的 total 校正
-        long commentTotal = item.Statistics?.CommentCount ?? 0;
-        TabComments.Content = commentTotal > 0 ? $"评论 {Count(commentTotal)}" : "评论";
+        // 评论 Tab 上不再挂数量（详情页的统计里有）
         _commentAwemeId = "";
 
         // 换视频后回到顶部，否则长文案还停在上一条的滚动位置
@@ -1107,7 +1231,12 @@ public partial class MainWindow : Window
                 : 3.0 / 4.0)
             : item.Video?.Aspect ?? 9.0 / 16.0;
 
-        LayoutVideo();
+        // 视频先别重排画布：新内容还没到，这时候按新宽高比缩放，
+        // 看到的是**上一条**画面被挤压/缩小一下，然后才切过去。
+        // 等 file-loaded 之后再排（PlayIndexAsync 里），变化就和新画面同时发生。
+        if (item.IsImagePost) LayoutVideo();
+        else _layoutAfterLoad = true;
+
         UpdateIndexLabel();
 
         // 正在看评论/主页的话，切作品就跟着换
@@ -1143,7 +1272,14 @@ public partial class MainWindow : Window
     private void UpdateIndexLabel()
         => IndexLabel.Text = _items.Count == 0 ? "" : $"{_index + 1} / {_items.Count}";
 
-    private void LayoutVideo()
+    /// <summary>
+    /// 按当前视频的宽高比，把画布摆到 VideoHost 里（留黑边）。
+    ///
+    /// animate = true 时给宽高加个短缓动。切视频时用它——不同宽高比的作品
+    /// 之间直接跳会"咯噔"一下，160ms 的缓动看起来就是滑过去的。
+    /// 窗口拉伸时必须是 false，否则拖边框会拖泥带水。
+    /// </summary>
+    private void LayoutVideo(bool animate = false)
     {
         double w = VideoHost.ActualWidth, h = VideoHost.ActualHeight;
         if (w <= 1 || h <= 1) return;
@@ -1153,8 +1289,37 @@ public partial class MainWindow : Window
         if (w / h > aspect) { targetH = h; targetW = h * aspect; }
         else { targetW = w; targetH = w / aspect; }
 
-        Surface.Width = Math.Max(1, targetW);
-        Surface.Height = Math.Max(1, targetH);
+        targetW = Math.Max(1, targetW);
+        targetH = Math.Max(1, targetH);
+
+        double fromW = Surface.ActualWidth > 1 ? Surface.ActualWidth : Surface.Width;
+        double fromH = Surface.ActualHeight > 1 ? Surface.ActualHeight : Surface.Height;
+
+        // 没实质变化就别动，避免每切一条都抖一下
+        if (Math.Abs(fromW - targetW) < 1 && Math.Abs(fromH - targetH) < 1) return;
+
+        AppLog.Write($"画布 {fromW:F0}×{fromH:F0} -> {targetW:F0}×{targetH:F0}" +
+                     (animate ? "（缓动）" : ""));
+
+        // 先清掉可能还在跑的动画，否则直接赋基值不生效
+        Surface.BeginAnimation(FrameworkElement.WidthProperty, null);
+        Surface.BeginAnimation(FrameworkElement.HeightProperty, null);
+        Surface.Width = targetW;
+        Surface.Height = targetH;
+
+        if (!animate || fromW <= 1 || fromH <= 1) return;
+
+        var ease = new System.Windows.Media.Animation.QuadraticEase
+        {
+            EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut,
+        };
+        var dur = TimeSpan.FromMilliseconds(160);
+        Surface.BeginAnimation(FrameworkElement.WidthProperty,
+            new System.Windows.Media.Animation.DoubleAnimation(fromW, targetW, dur)
+            { EasingFunction = ease });
+        Surface.BeginAnimation(FrameworkElement.HeightProperty,
+            new System.Windows.Media.Animation.DoubleAnimation(fromH, targetH, dur)
+            { EasingFunction = ease });
     }
 
     private void OnVideoHostSizeChanged(object sender, SizeChangedEventArgs e) => LayoutVideo();
@@ -1180,10 +1345,22 @@ public partial class MainWindow : Window
     {
         try
         {
-            // Esc 不进快捷键表：它只用来退出全屏
+            // Esc 不进快捷键表：先退全屏，再退作者流（回推荐 + 详情页）
             if (e.Key == Key.Escape)
             {
-                if (_fullscreen) { ToggleFullscreen(); e.Handled = true; }
+                if (_fullscreen)
+                {
+                    ToggleFullscreen();
+                    e.Handled = true;
+                    return;
+                }
+
+                if (_authorMode)
+                {
+                    // 必须在 await 之前置 Handled：await 一让出，事件就已经返回了
+                    e.Handled = true;
+                    await LeaveAuthorAsync();
+                }
                 return;
             }
 
@@ -1244,23 +1421,9 @@ public partial class MainWindow : Window
                     break;
 
                 case "author":
-                    // U 是个开关：
-                    //   在作者流里 -> 回推荐流，并切回「详情」页
-                    //   否则       -> 切到「主页」Tab 看封面墙
-                    // 之前只有"进去"没有"出来"，刷到作者的其他视频后只能按 R 重新拉推荐，
-                    // 推荐流里已经看过的位置就丢了。
-                    if (_authorMode)
-                    {
-                        _authorMode = false;
-                        _followMode = false;
-                        await SwitchFeedAsync(_recommendFeed, "推荐");
-                        SwitchTab(SideTab.Detail);
-                        SetStatus("已回到推荐");
-                    }
-                    else
-                    {
-                        SwitchTab(SideTab.Profile);
-                    }
+                    // U 是个开关：在作者流里回推荐，否则切到「主页」Tab
+                    if (_authorMode) await LeaveAuthorAsync();
+                    else SwitchTab(SideTab.Profile);
                     break;
 
                 case "follow":
@@ -1492,6 +1655,11 @@ public partial class MainWindow : Window
     private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         _prefetchCts?.Cancel();
+
+        // 退出前把现场存准（绕过 2 秒节流）
+        if (!_authorMode && !_followMode && _items.Count > 0 && _index >= 0)
+            LastSession.Save(_index, _items);
+
         try { await _proxy.DisposeAsync(); } catch { /* 收尾不抛 */ }
         if (_mpv is null) return;
 
