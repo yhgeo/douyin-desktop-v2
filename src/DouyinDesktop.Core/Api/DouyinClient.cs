@@ -1079,8 +1079,25 @@ public sealed class DouyinClient : IDisposable
 
     // ================= 请求头 =================
 
-    private void AddBrowserHeaders(HttpRequestMessage req, DouyinSession session)
+    /// <summary>
+    /// 高风控接口要的 x-tt-session-dtrait 头。缺了会被静默丢弃
+    /// （点赞返回 status_code=0 但没生效、评论/详情返回空 body）。
+    /// </summary>
+    private void AddDTrait(HttpRequestMessage req, string path)
     {
+        try
+        {
+            req.Headers.TryAddWithoutValidation("x-tt-session-dtrait",
+                DTrait.BuildHeader(path, _profile.UserAgent, _profile.ScreenWidth,
+                    _profile.ScreenHeight, _profile.CpuCores, _profile.DeviceMemory));
+        }
+        catch (Exception ex)
+        {
+            Log?.Invoke("dtrait 生成失败：" + ex.Message);
+        }
+    }
+
+    private void AddBrowserHeaders(HttpRequestMessage req, DouyinSession session)    {
         req.Headers.TryAddWithoutValidation("User-Agent", _profile.UserAgent);
         req.Headers.TryAddWithoutValidation("Referer", "https://www.douyin.com/");
         req.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
@@ -1094,7 +1111,20 @@ public sealed class DouyinClient : IDisposable
         req.Headers.TryAddWithoutValidation("sec-fetch-site", "same-origin");
         req.Headers.TryAddWithoutValidation("priority", "u=1, i");
         req.Headers.TryAddWithoutValidation("Cookie", session.CookieHeader);
+
+        // 高风控接口按路径自动补 dtrait（推荐流没在名单里，保持原样，别把好的弄坏）
+        string path = req.RequestUri?.AbsolutePath ?? "";
+        if (DTraitPaths.Contains(path)) AddDTrait(req, path);
     }
+
+    /// <summary>需要 x-tt-session-dtrait 的路径。加新接口时往这里添。</summary>
+    private static readonly HashSet<string> DTraitPaths = new(StringComparer.Ordinal)
+    {
+        "/aweme/v1/web/comment/list/",
+        "/aweme/v1/web/commit/item/digg/",
+        "/aweme/v1/web/aweme/detail/",
+        "/aweme/v1/web/aweme/post/",
+    };
 
     public void Dispose()
     {
