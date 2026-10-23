@@ -505,13 +505,20 @@ public partial class MainWindow : Window
                 }
 
                 // 关注流拿到空内容 = 服务端没把我们当登录用户（设备身份和 Cookie 对不上）。
-                // 这种情况只有重新登录能恢复，所以要主动提示，不能让人以为"我没关注人"。
+                // 但快速连切时也会空（请求太密被挡），所以只在停下来之后才计入。
                 if (r.Items.Count == 0)
                 {
-                    _followEmptyStreak++;
-                    AppLog.Write($"[关注流] 空内容（连续 {_followEmptyStreak} 次）");
-                    if (_followEmptyStreak >= 2)
-                        LoginHealth.Set(LoginHealth.State.Expired);
+                    if (JustSwitched)
+                    {
+                        AppLog.Write("[关注流] 空内容（连切中，不计入）");
+                    }
+                    else
+                    {
+                        _followEmptyStreak++;
+                        AppLog.Write($"[关注流] 空内容（连续 {_followEmptyStreak} 次）");
+                        if (_followEmptyStreak >= 3)
+                            LoginHealth.Set(LoginHealth.State.Expired);
+                    }
                 }
                 else
                 {
@@ -859,6 +866,8 @@ public partial class MainWindow : Window
     private async Task PlayIndexAsync(int index, bool force = false)
     {
         if (index < 0 || index >= _items.Count) return;
+
+        _lastSwitchAt = DateTime.Now;
 
         var item = _items[index];
 
@@ -1658,6 +1667,15 @@ public partial class MainWindow : Window
     /// <summary>关注流连续空内容的次数（用来判断"登录态没被服务端认"）。</summary>
     private int _followEmptyStreak;
 
+    /// <summary>
+    /// 最近是否在快速切视频（复用切换节流用的 _lastSwitchAt）。
+    ///
+    /// 快速连切时我们自己的请求会瞬间打很多（播放地址、详情、评论…），
+    /// 抖音会直接返回空 —— 这时候判"登录过期"是误报。
+    /// 所以健康检查只在**停下来 3 秒后**才做。
+    /// </summary>
+    private bool JustSwitched => (DateTime.Now - _lastSwitchAt).TotalSeconds < 3;
+
     private DateTime _lastHealthCheck = DateTime.MinValue;
     private bool _browserSyncTried;
 
@@ -1716,6 +1734,7 @@ public partial class MainWindow : Window
         // 状态正常就不查了——评论接口被频繁调用会被抖音短时限流，
         // 表现就是"刚登录能看，刷几条之后全空"，很容易被误判成登录过期。
         if (LoginHealth.Current == LoginHealth.State.Ok) return;
+        if (JustSwitched) return;                            // 刚连切完，别下结论
         if (DateTime.Now < _commentCooldownUntil) return;   // 刚被限流过，别再撞
 
         // 正常状态 30 分钟才查一次；已经出现过一次空，就 20 秒后复查确认
