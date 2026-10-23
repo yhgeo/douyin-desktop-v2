@@ -95,6 +95,7 @@ public partial class MainWindow : Window
         _feed = _recommendFeed;
         CommentList.ItemsSource = _commentVms;
         _client.Log += msg => Dispatcher.BeginInvoke(() => PushStatus(msg));
+        _client.LoginExpired += () => Dispatcher.BeginInvoke(OnLoginExpired);
         Surface.HandleCreated += OnSurfaceReady;
 
         // 进度条：250ms 刷一次就够了，太频繁反而白耗 CPU
@@ -1765,9 +1766,27 @@ public partial class MainWindow : Window
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e) => LayoutVideo();
 
+    /// <summary>登录态被判失效后一直挂着提示，直到重新登录。</summary>
+    private bool _loginExpired;
+
     private void SetStatus(string msg)
     {
+        // 登录失效是"必须让用户看到"的状态：接口会静默返回空，
+        // 不提示的话用户只会以为"没评论 / 没作品"。
+        if (_loginExpired)
+        {
+            StatusText.Text = "登录已过期 —— 打开设置（Ctrl+O）重新扫码　·　" + msg;
+            StatusText.Foreground = new SolidColorBrush(Color.FromRgb(0xFE, 0x2C, 0x55));
+            return;
+        }
+
         StatusText.Text = msg;
+    }
+
+    private void OnLoginExpired()
+    {
+        _loginExpired = true;
+        SetStatus("评论 / 作者作品都读不到了");
     }
 
     /// <summary>技术日志：界面上只显示最后一条，完整记录写文件。</summary>
@@ -2092,6 +2111,9 @@ public partial class MainWindow : Window
         session.LoginCookies = win.Cookies;
         session.Save();
 
+        _loginExpired = false;
+        _client.ResetLoginExpiredFlag();
+        StatusText.Foreground = (Brush)FindResource("SubTextBrush");
         SetStatus("登录成功，正在刷新推荐…");
         await LoadFeedAsync(reset: true);
         return true;

@@ -558,12 +558,37 @@ public sealed class DouyinClient : IDisposable
         return "";
     }
 
+
     /// <summary>
     /// 点赞 / 取消点赞。type=1 点赞，0 取消。必须登录。
     /// 路径 /aweme/v1/web/commit/item/digg/ 是网页版真实请求。
     /// </summary>
     public async Task<bool> DiggAsync(string awemeId, bool like, CancellationToken ct = default)
         => await DiggRawAsync(awemeId, like, ct) == 0;
+
+    /// <summary>
+    /// 登录态失效时触发。
+    ///
+    /// 抖音对过期的登录态**不返回错误码**，而是静默返回空 body，
+    /// 所以只能靠"有 Cookie 但接口拿不到东西"来推断。
+    /// 每次会话只报一次，避免刷屏。
+    /// </summary>
+    public event Action? LoginExpired;
+
+    private bool _loginExpiredReported;
+
+    /// <summary>登录成功后调一下，允许再次报告。</summary>
+    public void ResetLoginExpiredFlag() => _loginExpiredReported = false;
+
+    private void ReportLoginExpired()
+    {
+        if (_loginExpiredReported) return;
+        if (Session?.IsLoggedIn != true) return;   // 本来就没登录，不算"失效"
+
+        _loginExpiredReported = true;
+        Log?.Invoke("登录态已失效");
+        LoginExpired?.Invoke();
+    }
 
     /// <summary>
     /// 校验登录态是否真的还有效。
@@ -579,7 +604,12 @@ public sealed class DouyinClient : IDisposable
 
         int code = await DiggRawAsync("7000000000000000000", true, ct);
         if (code < 0) return null;
-        return code != 8;
+        if (code == 8)
+        {
+            ReportLoginExpired();
+            return false;
+        }
+        return true;
     }
 
     /// <summary>点赞请求本体，返回 status_code（-1 表示请求失败）。</summary>
@@ -721,6 +751,9 @@ public sealed class DouyinClient : IDisposable
             }
 
             var page = ParseComments(body, cursor, count);
+
+            // 登录着却拿到空 → 多半是登录态过期了，让界面明确提示
+            if (page.Comments.Count == 0) ReportLoginExpired();
 
             Log?.Invoke(page.Comments.Count == 0
                 ? $"评论 0 条，原始返回：{body[..Math.Min(300, body.Length)]}"
@@ -919,6 +952,7 @@ public sealed class DouyinClient : IDisposable
 
             if (items.Count == 0)
             {
+                ReportLoginExpired();
                 string snippet = body.Length > 160 ? body[..160].Replace('\n', ' ') + "…" : body;
                 return FeedResult.Fail($"没有作品：{snippet}", sw.ElapsedMilliseconds);
             }

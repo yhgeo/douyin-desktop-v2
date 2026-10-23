@@ -75,7 +75,14 @@
 
             <!-- 视频区：mpv 直接往这里画。任何 WPF 元素都盖不住它，所以这里不放文字 -->
             <!-- 画布子窗口带 WS_EX_TRANSPARENT，点击会落到这层，用来做「点一下暂停」 -->
-            <Grid x:Name="VideoHost" Grid.Column="0" Background="Black" SizeChanged="OnVideoHostSizeChanged"
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <!-- 进度条必须放在 mpv 区域**外面**，HwndHost 会盖住同区域的 WPF 内容 -->
+                    <RowDefinition Height="3" />
+                </Grid.RowDefinitions>
+
+            <Grid x:Name="VideoHost" Grid.Row="0" Background="Black" SizeChanged="OnVideoHostSizeChanged"
                   MouseLeftButtonUp="OnVideoAreaClick">
 
                 <!-- 底衬：取画面的主色调，铺不满时就是这一块颜色（不用模糊图，太乱） -->
@@ -97,10 +104,11 @@
                                    FontSize="12" Foreground="White" />
                     </Border>
                 </Grid>
+            </Grid>
 
-                <!-- 底部播放进度条：细线，不挡画面，也不吃点击 -->
-                <Border x:Name="ProgressTrack" VerticalAlignment="Bottom" Height="3"
-                        Background="#26FFFFFF" Panel.ZIndex="20" IsHitTestVisible="False">
+                <!-- 播放进度条：放在 mpv 画布下方独立的 3px 行里 -->
+                <Border x:Name="ProgressTrack" Grid.Row="1" Background="#26FFFFFF"
+                        IsHitTestVisible="False">
                     <Rectangle x:Name="ProgressFill" HorizontalAlignment="Left"
                                Fill="#FE2C55" Width="0" />
                 </Border>
