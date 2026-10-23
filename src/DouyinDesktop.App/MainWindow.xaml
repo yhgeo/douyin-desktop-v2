@@ -97,6 +97,13 @@
                                    FontSize="12" Foreground="White" />
                     </Border>
                 </Grid>
+
+                <!-- 底部播放进度条：细线，不挡画面，也不吃点击 -->
+                <Border x:Name="ProgressTrack" VerticalAlignment="Bottom" Height="3"
+                        Background="#26FFFFFF" Panel.ZIndex="20" IsHitTestVisible="False">
+                    <Rectangle x:Name="ProgressFill" HorizontalAlignment="Left"
+                               Fill="#FE2C55" Width="0" />
+                </Border>
             </Grid>
 
             <!-- 信息栏 -->

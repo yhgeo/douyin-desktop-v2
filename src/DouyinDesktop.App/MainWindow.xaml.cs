@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Windows.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -95,6 +96,32 @@ public partial class MainWindow : Window
         CommentList.ItemsSource = _commentVms;
         _client.Log += msg => Dispatcher.BeginInvoke(() => PushStatus(msg));
         Surface.HandleCreated += OnSurfaceReady;
+
+        // 进度条：250ms 刷一次就够了，太频繁反而白耗 CPU
+        _progressTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _progressTimer.Tick += (_, _) => UpdateProgress();
+        _progressTimer.Start();
+    }
+
+    private DispatcherTimer? _progressTimer;
+
+    /// <summary>按当前播放位置画底部进度条。时长优先取作品数据，拿不到就用 0（不画）。</summary>
+    private void UpdateProgress()
+    {
+        if (ProgressFill is null || ProgressTrack is null) return;
+
+        double pos = _mpv?.Position ?? 0;
+        double total = _mpv?.Duration ?? 0;
+
+        if (total <= 0 || pos <= 0 || _imageMode)
+        {
+            ProgressFill.Width = 0;
+            return;
+        }
+
+        double ratio = Math.Clamp(pos / total, 0, 1);
+        double track = ProgressTrack.ActualWidth;
+        ProgressFill.Width = track <= 0 ? 0 : track * ratio;
     }
 
     /// <summary>
