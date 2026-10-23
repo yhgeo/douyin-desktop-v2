@@ -888,8 +888,6 @@ public partial class MainWindow : Window
     {
         if (index < 0 || index >= _items.Count) return;
 
-        _lastSwitchAt = DateTime.Now;
-
         var item = _items[index];
 
         // 图集作品没有视频流，走图片展示
@@ -1689,13 +1687,13 @@ public partial class MainWindow : Window
     private int _followEmptyStreak;
 
     /// <summary>
-    /// 最近是否在快速切视频（复用切换节流用的 _lastSwitchAt）。
+    /// 最近是否在快速切视频。
     ///
-    /// 快速连切时我们自己的请求会瞬间打很多（播放地址、详情、评论…），
-    /// 抖音会直接返回空 —— 这时候判"登录过期"是误报。
-    /// 所以健康检查只在**停下来 3 秒后**才做。
+    /// ⚠️ 必须和 SwitchThrottled 用**同一个时间基准（UtcNow）**。
+    /// 之前这里用 DateTime.Now（本地时间，比 UTC 快 8 小时），
+    /// 和 UTC 时间戳相减得到负数 → 永远"刚切过" → 切换被永久拦死。
     /// </summary>
-    private bool JustSwitched => (DateTime.Now - _lastSwitchAt).TotalSeconds < 3;
+    private bool JustSwitched => (DateTime.UtcNow - _lastSwitchAt).TotalSeconds < 3;
 
     private DateTime _lastHealthCheck = DateTime.MinValue;
     private bool _browserSyncTried;
