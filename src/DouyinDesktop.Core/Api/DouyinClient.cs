@@ -741,6 +741,8 @@ public sealed class DouyinClient : IDisposable
             // 登录着却拿到空 → 多半是登录态过期了，让界面明确提示
             if (page.Comments.Count == 0) ReportLoginExpired();
 
+            Log?.Invoke("[评论URL] " + url);
+
             Log?.Invoke(page.Comments.Count == 0
                 ? $"评论 0 条，原始返回：{body[..Math.Min(300, body.Length)]}"
                 : $"评论 {page.Comments.Count} 条 / 共 {page.Total}");

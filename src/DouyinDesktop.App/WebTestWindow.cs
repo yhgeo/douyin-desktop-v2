@@ -114,6 +114,28 @@ public sealed class WebTestWindow : Window
                 string ourToken = DouyinDesktop.Core.Api.DouyinSession.Load()?.MsToken ?? "";
                 AppLog.Write($"[自检] 浏览器 msToken 长度 {browserToken.Length}：{browserToken}");
                 AppLog.Write($"[自检] 我们的 msToken 长度 {ourToken.Length}：{ourToken}　相同={browserToken == ourToken}");
+
+                // ===== 关键对比：同一条 query，浏览器算的 a_bogus vs 我们算的 =====
+                string browserAbogus = Uri.UnescapeDataString(ExtractParam(capturedUrl, "a_bogus"));
+                string queryWithSign = new Uri(capturedUrl).Query.TrimStart('?');
+                int cut = queryWithSign.IndexOf("&a_bogus=", StringComparison.Ordinal);
+                string baseQuery = cut > 0 ? queryWithSign[..cut] : queryWithSign;
+
+                var signer = new DouyinDesktop.Core.Signing.ABogus(false,
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36");
+                string ourAbogus = signer.SignQuery(baseQuery, "", "www.douyin.com");
+
+                AppLog.Write($"[自检] a_bogus 长度：浏览器 {browserAbogus.Length}，我们 {ourAbogus.Length}");
+                AppLog.Write($"[自检] 浏览器 a_bogus：{browserAbogus}");
+                AppLog.Write($"[自检] 我们的 a_bogus：{ourAbogus}");
+
+                int diffAt = -1;
+                int minLen = Math.Min(browserAbogus.Length, ourAbogus.Length);
+                for (int i = 0; i < minLen; i++)
+                {
+                    if (browserAbogus[i] != ourAbogus[i]) { diffAt = i; break; }
+                }
+                AppLog.Write($"[自检] 首个不同位置：{diffAt}（长度相同时 -1 表示完全一致）");
             }
 
             Close();

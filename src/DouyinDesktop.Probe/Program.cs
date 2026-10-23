@@ -101,6 +101,27 @@ if (args.Length > 0 && args[0] == "detail")
     return 0;
 }
 
+// 连续多次评论请求：看第几次开始失败，并打印每次的完整 URL 供对比
+if (args.Length > 0 && args[0] == "comments3")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var cd = DouyinClient.Create();
+    cd.Log += m => Console.WriteLine("    " + m);
+
+    var f = await cd.GetFeedAsync(6);
+    if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
+
+    for (int i = 0; i < Math.Min(4, f.Items.Count); i++)
+    {
+        string id = f.Items[i].Id;
+        Console.WriteLine($"--- 第 {i + 1} 次：{id} ---");
+        var page = await cd.GetCommentsAsync(id, 0, 5);
+        Console.WriteLine($"    结果：{page.Comments.Count} 条");
+        await Task.Delay(1500);
+    }
+    return 0;
+}
+
 // 评论接口验证：登录态下是否还返回 0 条
 if (args.Length > 0 && args[0] == "comments")
 {
