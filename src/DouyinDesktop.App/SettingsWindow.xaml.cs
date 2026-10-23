@@ -57,6 +57,13 @@ public partial class SettingsWindow : Window
         _settings.Save();
     }
 
+    private void OnWebChannelChanged(object sender, RoutedEventArgs e)
+    {
+        if (_danmakuLoading) return;
+        _settings.WebChannel = WebChannelCheck.IsChecked == true;
+        _settings.Save();
+    }
+
     private void OnDanmakuChanged(object sender, RoutedEventArgs e)
     {
         _settings.Danmaku = DanmakuCheck.IsChecked == true;
@@ -84,6 +91,7 @@ public partial class SettingsWindow : Window
         {
             DanmakuCheck.IsChecked = _settings.Danmaku;
             OverlayCheck.IsChecked = _settings.DanmakuRenderer == "overlay";
+            WebChannelCheck.IsChecked = _settings.WebChannel;
             FontSlider.Value = Math.Clamp(_settings.DanmakuFontPercent, FontSlider.Minimum, FontSlider.Maximum);
             OpacitySlider.Value = Math.Clamp(_settings.DanmakuOpacity, OpacitySlider.Minimum, OpacitySlider.Maximum);
             OutlineSlider.Value = Math.Clamp(_settings.DanmakuOutlinePercent, OutlineSlider.Minimum, OutlineSlider.Maximum);

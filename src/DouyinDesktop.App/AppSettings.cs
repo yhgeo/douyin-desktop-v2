@@ -49,6 +49,13 @@ public sealed class AppSettings
     /// </summary>
     public string DanmakuRenderer { get; set; } = "ass";
 
+    /// <summary>
+    /// 浏览器通道：接口被风控挡掉（评论/详情/作者主页返回空）时，
+    /// 改用一个隐藏的 WebView2 在页面里 fetch，签名由抖音自己的 JS 加。
+    /// 关掉就走纯 C# 请求（省内存，但签名被挡时这些功能用不了）。
+    /// </summary>
+    public bool WebChannel { get; set; }
+
     public DouyinDesktop.Core.Models.DanmakuStyle ToDanmakuStyle() => new()
     {
         FontPercent = DanmakuFontPercent,

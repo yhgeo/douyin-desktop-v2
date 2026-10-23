@@ -40,6 +40,7 @@ public static class WebSign
         "/aweme/v1/web/music/detail/",
         "/aweme/v1/web/collects/list/",
         "/aweme/v1/web/collects/video/list/",
+        "/aweme/v1/web/comment/list/",
     };
 
     public static bool IsProtected(string path) => ProtectedPaths.Contains(path);
