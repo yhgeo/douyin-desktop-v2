@@ -108,6 +108,40 @@ public partial class MainWindow : Window
         _progressTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _progressTimer.Tick += (_, _) => UpdateProgress();
         _progressTimer.Start();
+
+        // 每 10 分钟从内置浏览器同步一次 Cookie。
+        //
+        // 为什么要做：我们保存的是登录那一刻的快照，而抖音会在浏览器里
+        // 不断刷新登录凭据。不同步的话，快照慢慢失效，表现就是"登录老是掉"。
+        // 只读 Cookie、不加载页面，1–2 秒，且只在空闲时做。
+        _cookieSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(10) };
+        _cookieSyncTimer.Tick += async (_, _) => await SyncCookiesQuietlyAsync();
+        _cookieSyncTimer.Start();
+    }
+
+    private DispatcherTimer? _cookieSyncTimer;
+
+    /// <summary>安静地同步一次浏览器 Cookie（不打扰用户、不弹窗、不阻塞操作）。</summary>
+    private async Task SyncCookiesQuietlyAsync()
+    {
+        var session = _client.Session;
+        if (session?.IsLoggedIn != true) return;
+        if (JustSwitched) return;                    // 正在刷视频，别插一脚
+
+        try
+        {
+            string? cookies = await WebCookieSync.ReadAsync();
+            if (string.IsNullOrEmpty(cookies) || !cookies.Contains("sessionid=")) return;
+            if (cookies == session.LoginCookies) return;
+
+            session.LoginCookies = cookies;
+            session.Save();
+            AppLog.Write("已自动同步浏览器 Cookie（保持登录有效）");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("自动同步 Cookie 失败：" + ex.Message);
+        }
     }
 
     private DispatcherTimer? _progressTimer;

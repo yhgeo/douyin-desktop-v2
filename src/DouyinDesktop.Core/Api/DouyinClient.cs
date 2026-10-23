@@ -577,6 +577,9 @@ public sealed class DouyinClient : IDisposable
     /// <summary>模板失效时通知 App 层清掉。</summary>
     public Action<string>? InvalidateTemplate { get; set; }
 
+    /// <summary>上次尝试抓模板的时间（失败后冷却 5 分钟，避免每次都卡界面）。</summary>
+    private DateTime _lastCaptureAttempt = DateTime.MinValue;
+
     /// <summary>把模板 URL 里的某个参数换成新值（保留其余原样）。</summary>
     private static string SetParam(string query, string name, string value)
     {
@@ -799,8 +802,11 @@ public sealed class DouyinClient : IDisposable
         // 自己拼怎么调都差一点（webid 换成浏览器的仍失败），照抄浏览器最稳。
         const string CommentPath = "/aweme/v1/web/comment/list/";
         string? tpl = GetTemplate?.Invoke(CommentPath);
-        if (tpl is null && CaptureTemplate is not null)
+        if (tpl is null && CaptureTemplate is not null
+            && DateTime.UtcNow - _lastCaptureAttempt > TimeSpan.FromMinutes(5))
         {
+            // 抓模板要起一次浏览器，失败了不能每次都重来（否则界面一直卡）
+            _lastCaptureAttempt = DateTime.UtcNow;
             Log?.Invoke("首次使用，正在抓取接口模板（约 5 秒）…");
             if (await CaptureTemplate(awemeId)) tpl = GetTemplate?.Invoke(CommentPath);
         }
@@ -839,12 +845,9 @@ public sealed class DouyinClient : IDisposable
 
             var page = ParseComments(body, cursor, count);
 
-            // 模板失效（又变空了）就清掉，下次重新抓
-            if (page.Comments.Count == 0 && tpl is not null)
-            {
-                InvalidateTemplate?.Invoke(CommentPath);
-                Log?.Invoke("模板可能失效，已清除");
-            }
+            // 注意：空响应**不要**立刻清模板。
+            // 连切视频、请求过密都会返回空，清掉只会导致下次又花 5 秒重抓。
+            // 模板本身参数是稳定的，留着更划算。
 
             // 空 body 时把状态码和关键响应头打出来——服务端拒绝的原因通常在这里
             if (page.Comments.Count == 0)
@@ -1037,28 +1040,13 @@ public sealed class DouyinClient : IDisposable
                  $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
 
         // 作者主页在 secsdk 的 webSign 策略表里，整条 query 还要再签一次
+        //
+        // 注意：**不要**给这个接口套"浏览器模板"。
+        // 视频页不会发出 aweme/post 请求，模板根本抓不到，
+        // 每次抓都要白等 14 秒（实测日志：[模板] 一条都没抓到），
+        // 表现就是"打开主页卡很久"。这条接口用自己拼的参数一直能正常工作。
         string url = WebSign.SignUrl(
             "https://www.douyin.com/aweme/v1/web/aweme/post/", query, uifid);
-
-        // 优先用模板（浏览器真实 URL），只替换作者和分页参数再重签
-        const string PostPath = "/aweme/v1/web/aweme/post/";
-        string? postTpl = GetTemplate?.Invoke(PostPath);
-        if (postTpl is null && CaptureTemplate is not null)
-        {
-            Log?.Invoke("首次使用，正在抓取主页模板…");
-            if (await CaptureTemplate(secUid)) postTpl = GetTemplate?.Invoke(PostPath);
-        }
-
-        if (postTpl is not null)
-        {
-            string? fromTpl = BuildFromTemplate(postTpl, "", 0, 0, session,
-                "sec_user_id", secUid);
-            if (fromTpl is not null)
-            {
-                url = fromTpl;
-                Log?.Invoke("作者作品使用模板 URL");
-            }
-        }
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);

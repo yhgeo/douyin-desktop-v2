@@ -21,7 +21,7 @@ public static class TemplateFetcher
         "/aweme/v1/web/aweme/post/",
     };
 
-    public static async Task<bool> CaptureAsync(string awemeId, int timeoutSeconds = 14)
+    public static async Task<bool> CaptureAsync(string awemeId, int timeoutSeconds = 8)
     {
         Window? host = null;
         WebView2? web = null;
