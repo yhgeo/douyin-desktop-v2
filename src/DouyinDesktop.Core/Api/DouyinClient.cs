@@ -642,9 +642,16 @@ public sealed class DouyinClient : IDisposable
             new("cursor", cursor.ToString()),
             new("count", count.ToString()),
             new("item_type", "0"),
+            // 下面这几个是抓包对比出来的：网页版评论请求都带，缺了会被静默拒绝
+            new("pc_img_format", "webp"),
+            new("update_version_code", "170400"),
+            new("pc_libra_divert", "Windows"),
+            new("support_h265", "0"),
+            new("support_dash", "1"),
         };
         ps.AddRange(_profile.PlatformParams());
         ps.Add(new("webid", _profile.WebId));
+        ps.Add(new("uifid", session.EffectiveUifid));
         ps.Add(new("msToken", session.MsToken));
 
         string query = UrlCodec.ToQuery(ps);
@@ -655,9 +662,10 @@ public sealed class DouyinClient : IDisposable
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
-        // 评论接口的 Referer 必须是作品页，首页 Referer 会被挡
+        // 抓包确认：网页版评论请求的 Referer 是**首页**，不是作品页。
+        // 之前改成作品页反而被挡（返回空 body）。
         req.Headers.Remove("Referer");
-        req.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/video/{awemeId}");
+        req.Headers.TryAddWithoutValidation("Referer", "https://www.douyin.com/");
 
         try
         {
@@ -1054,12 +1062,6 @@ public sealed class DouyinClient : IDisposable
         req.Headers.TryAddWithoutValidation("sec-fetch-site", "same-origin");
         req.Headers.TryAddWithoutValidation("priority", "u=1, i");
         req.Headers.TryAddWithoutValidation("Cookie", session.CookieHeader);
-
-        // 登录态下抖音对接口有 CSRF 校验：少了这个头，很多接口会返回空结果
-        // （评论 0 条）或者 status_code=0 但实际什么都没做（点赞不生效）。
-        string csrf = CookieValue(session.LoginCookies, "passport_csrf_token");
-        if (csrf.Length > 0)
-            req.Headers.TryAddWithoutValidation("x-secsdk-csrf-token", csrf);
     }
 
     public void Dispose()

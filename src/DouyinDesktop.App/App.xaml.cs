@@ -24,7 +24,9 @@ public partial class App : Application
                 ? new SettingsWindow(KeyMap.Load(), AppSettings.Load(),
                     DouyinDesktop.Core.Api.DouyinClient.Create(),
                     () => Task.FromResult(false), () => { })
-                : new MainWindow();
+                : e.Args.FirstOrDefault(a => a.StartsWith("--capture=", StringComparison.Ordinal)) is { } cap
+                    ? new CaptureWindow(cap["--capture=".Length..])
+                    : new MainWindow();
 
         MainWindow = win;
         win.Show();
