@@ -1215,6 +1215,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 换作者时先把上一位的作品清掉，否则加载期间会看到别人的视频
+        ProfileList.ItemsSource = null;
+        ProfileName.Text = "@" + author.Nickname;
+        ProfileAvatar.Source = null;
+        ProfileCount.Text = "加载中…";
+
         ProfileCount.Text = "加载中…";
         var result = await _client.GetUserPostsAsync(author.SecUid);
         if (!result.Success)

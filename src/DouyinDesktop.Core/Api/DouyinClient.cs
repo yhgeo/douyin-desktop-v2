@@ -442,6 +442,9 @@ public sealed class DouyinClient : IDisposable
             var items = ParseAwemeList(body);
             if (items.Count == 0) items = ParseFeed(body);
 
+            // 关注流诊断：看服务端到底给了什么（是否把我们当游客）
+            Log?.Invoke($"[feed:{endpoint}] {items.Count} 条，长度 {body.Length}，前 120 字：{body[..Math.Min(120, body.Length)]}");
+
             if (items.Count == 0)
             {
                 // 结构对不上时把顶层字段打出来，方便定位
