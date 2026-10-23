@@ -850,6 +850,9 @@ public partial class MainWindow : Window
         SaveSessionIfNeeded();
     }
 
+    /// <summary>已经为重试刷过地址的作品，避免同一个 id 无限重试。</summary>
+    private readonly HashSet<string> _refreshTried = new();
+
     /// <summary>重新取一次详情换上新播放地址（老条目的地址会过期）。</summary>
     private async Task<Aweme?> RefreshPlayUrlAsync(Aweme item)
     {
@@ -1417,8 +1420,22 @@ public partial class MainWindow : Window
 
         Dispatcher.BeginInvoke(async () =>
         {
-            _consecutiveFailures++;
             string id = _index >= 0 && _index < _items.Count ? _items[_index].Id : "?";
+
+            // mpv 的加载失败是**异步**的 end-file，不是 LoadAsync 抛异常，
+            // 所以刷新地址的重试必须挂在这里。每条只重试一次，避免死循环。
+            if (_index >= 0 && _index < _items.Count && _refreshTried.Add(id))
+            {
+                AppLog.Write($"加载失败（{reason}），刷新地址重试：{id}");
+                var fresh = await RefreshPlayUrlAsync(_items[_index]);
+                if (fresh is not null)
+                {
+                    await PlayIndexAsync(_index, force: true);
+                    return;
+                }
+            }
+
+            _consecutiveFailures++;
             AppLog.Write($"加载失败 #{_consecutiveFailures} {id}: {reason}");
             SetStatus($"加载失败：{reason}");
 

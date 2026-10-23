@@ -550,6 +550,27 @@ public sealed class DouyinClient : IDisposable
     /// 路径 /aweme/v1/web/commit/item/digg/ 是网页版真实请求。
     /// </summary>
     public async Task<bool> DiggAsync(string awemeId, bool like, CancellationToken ct = default)
+        => await DiggRawAsync(awemeId, like, ct) == 0;
+
+    /// <summary>
+    /// 校验登录态是否真的还有效。
+    ///
+    /// 拿一个**不存在的作品 id** 调点赞接口：未登录/失效返回 status_code=8，
+    /// 已登录会返回别的错误（作品不存在之类）。不存在的 id 不会产生任何真实点赞，
+    /// 所以可以安全地当探针用。
+    /// 返回 null 表示网络问题判断不了。
+    /// </summary>
+    public async Task<bool?> VerifyLoginAsync(CancellationToken ct = default)
+    {
+        if (Session?.IsLoggedIn != true) return false;
+
+        int code = await DiggRawAsync("7000000000000000000", true, ct);
+        if (code < 0) return null;
+        return code != 8;
+    }
+
+    /// <summary>点赞请求本体，返回 status_code（-1 表示请求失败）。</summary>
+    private async Task<int> DiggRawAsync(string awemeId, bool like, CancellationToken ct)
     {
         var session = await EnsureSessionAsync(ct: ct);
 
@@ -591,7 +612,7 @@ public sealed class DouyinClient : IDisposable
             if (!resp.IsSuccessStatusCode)
             {
                 Log?.Invoke($"点赞 HTTP {(int)resp.StatusCode}");
-                return false;
+                return -1;
             }
 
             using var doc = JsonDocument.Parse(body);
@@ -599,12 +620,12 @@ public sealed class DouyinClient : IDisposable
             Log?.Invoke(code == 0
                 ? $"点赞 {(like ? "赞" : "取消")}成功"
                 : $"点赞 status_code={code}：{body[..Math.Min(240, body.Length)]}");
-            return code == 0;
+            return code;
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
         {
             Log?.Invoke("点赞失败：" + ex.Message);
-            return false;
+            return -1;
         }
     }
 

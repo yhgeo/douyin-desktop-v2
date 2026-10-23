@@ -181,6 +181,35 @@ public partial class SettingsWindow : Window
 
         LoginBtn.Content = logged ? "重新登录" : "扫码登录";
         LogoutBtn.Visibility = logged ? Visibility.Visible : Visibility.Collapsed;
+
+        if (logged) _ = VerifyLoginAsync();
+    }
+
+    /// <summary>
+    /// 本地有 Cookie 不等于服务端认这个登录态（过期了照样是"已登录"）。
+    /// 这里实际问一次服务端，失效就把状态标出来，别让用户以为还能点赞/关注。
+    /// </summary>
+    private async Task VerifyLoginAsync()
+    {
+        try
+        {
+            bool? ok = await _client.VerifyLoginAsync();
+            if (ok == true) return;
+
+            if (ok == false)
+            {
+                AccountStatus.Text = "登录已失效，请重新扫码";
+                AccountStatus.Foreground = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(0xFE, 0x2C, 0x55));
+                HintText.Text = "点赞、关注、评论都需要有效登录，点「重新登录」扫码即可。";
+                LoginBtn.Content = "重新登录";
+                LogoutBtn.Visibility = Visibility.Visible;
+            }
+        }
+        catch
+        {
+            // 网络问题判断不了就保持原样
+        }
     }
 
     private async void OnLoginClick(object sender, RoutedEventArgs e)
