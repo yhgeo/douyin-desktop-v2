@@ -1056,6 +1056,12 @@ public sealed class DouyinClient : IDisposable
         req.Headers.TryAddWithoutValidation("sec-fetch-site", "same-origin");
         req.Headers.TryAddWithoutValidation("priority", "u=1, i");
         req.Headers.TryAddWithoutValidation("Cookie", session.CookieHeader);
+
+        // 登录态下抖音对接口有 CSRF 校验：少了这个头，很多接口会返回空结果
+        // （评论 0 条）或者 status_code=0 但实际什么都没做（点赞不生效）。
+        string csrf = CookieValue(session.LoginCookies, "passport_csrf_token");
+        if (csrf.Length > 0)
+            req.Headers.TryAddWithoutValidation("x-secsdk-csrf-token", csrf);
     }
 
     public void Dispose()

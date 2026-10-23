@@ -85,6 +85,24 @@ if (args.Length > 0 && args[0] == "session")
     return same == Math.Min(5, loaded.Items.Count) ? 0 : 1;
 }
 
+// 评论接口验证：登录态下是否还返回 0 条
+if (args.Length > 0 && args[0] == "comments")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var cd = DouyinClient.Create();
+    cd.Log += m => Console.WriteLine("    " + m);
+
+    var f = await cd.GetFeedAsync(5);
+    if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
+
+    var item = f.Items[0];
+    Console.WriteLine($"作品 {item.Id} 评论数 {item.Statistics?.CommentCount}");
+    var page = await cd.GetCommentsAsync(item.Id, 0, 20);
+    Console.WriteLine($"拿到 {page.Comments.Count} 条 / 共 {page.Total}");
+    foreach (var c in page.Comments.Take(2)) Console.WriteLine("    · " + c.Text);
+    return 0;
+}
+
 // 点赞接口试探：用不存在的作品 id，不会在账号上留下真实点赞，
 // 只看请求形状对不对（签名/方法/参数名）。
 if (args.Length > 0 && args[0] == "diggtest")

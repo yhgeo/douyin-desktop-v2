@@ -917,16 +917,26 @@ public partial class MainWindow : Window
         try
         {
             bool like = !_liked.Contains(item.Id);
-            if (await _client.DiggAsync(item.Id, like))
-            {
-                if (like) _liked.Add(item.Id); else _liked.Remove(item.Id);
-                UpdateLikeVisual(item);
-                SetStatus(like ? "已点赞" : "已取消点赞");
-            }
-            else
+            if (!await _client.DiggAsync(item.Id, like))
             {
                 SetStatus("点赞失败（可能是登录态失效）");
+                return;
             }
+
+            // status_code=0 不等于真的生效（风控会静默丢弃）。
+            // 回读一次详情，看 user_digged 有没有跟着变。
+            var check = await _client.GetAwemeDetailAsync(item.Id);
+            bool? actual = check is null ? null : check.UserDigged == 1;
+
+            if (actual is not null && actual != like)
+            {
+                SetStatus(like ? "点赞没有生效（可能被风控）" : "取消点赞没有生效");
+                return;
+            }
+
+            if (like) _liked.Add(item.Id); else _liked.Remove(item.Id);
+            UpdateLikeVisual(item);
+            SetStatus(like ? "已点赞" : "已取消点赞");
         }
         finally { _likeBusy = false; }
     }
