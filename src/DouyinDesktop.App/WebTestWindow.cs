@@ -137,6 +137,10 @@ public sealed class WebTestWindow : Window
                 }
                 AppLog.Write($"[自检] 首个不同位置：{diffAt}（长度相同时 -1 表示完全一致）");
 
+                // 顺便把这条 URL 存成模板，供客户端直接使用
+                ApiTemplate.Save("/aweme/v1/web/comment/list/", capturedUrl);
+                AppLog.Write("[自检] 已保存评论接口模板");
+
                 // 把浏览器真实使用的 webid 记下来（强校验接口要核对它）
                 string browserWebId = ExtractParam(capturedUrl, "webid");
                 if (browserWebId.Length > 10)

@@ -1,3 +1,5 @@
+using System.IO;
+using System.Text.Json;
 using DouyinDesktop.Core;
 using DouyinDesktop.Core.Api;
 
@@ -124,6 +126,17 @@ if (args.Length > 0 && args[0] == "comments3")
 
     var f = await cd.GetFeedAsync(6);
     if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
+
+    // 让探针也能用接口模板（和主程序一致）
+    var tplPath = Path.Combine(DouyinDesktop.Core.DouyinPaths.DataDirectory, "api-templates.json");
+    if (File.Exists(tplPath))
+    {
+        var map = JsonSerializer.Deserialize<Dictionary<string, string>>(
+            File.ReadAllText(tplPath));
+        if (map is not null) cd.GetTemplate = p => map.TryGetValue(p, out var u) ? u : null;
+        Console.WriteLine("TPL=" + string.Join(",", map is null ? new List<string>() : map.Keys.ToList()));
+    }
+    else Console.WriteLine("TPL=none  DIR=" + DouyinDesktop.Core.DouyinPaths.DataDirectory);
 
     string? tok3 = Environment.GetEnvironmentVariable("DY_MSTOKEN");
     if (tok3 is not null)

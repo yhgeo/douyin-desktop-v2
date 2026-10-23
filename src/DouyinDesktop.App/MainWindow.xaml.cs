@@ -95,6 +95,10 @@ public partial class MainWindow : Window
         _feed = _recommendFeed;
         CommentList.ItemsSource = _commentVms;
         _client.Log += msg => Dispatcher.BeginInvoke(() => PushStatus(msg));
+        // 强校验接口走「浏览器模板」：平时不碰浏览器，模板缺失/失效才抓一次
+        _client.GetTemplate = ApiTemplate.Get;
+        _client.CaptureTemplate = id => TemplateFetcher.CaptureAsync(id);
+        _client.InvalidateTemplate = ApiTemplate.Invalidate;
         _healthHandler = () => Dispatcher.BeginInvoke(UpdateExpiredBadge);
         LoginHealth.Changed += _healthHandler;
         Closed += (_, _) => LoginHealth.Changed -= _healthHandler;

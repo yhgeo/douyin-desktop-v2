@@ -563,6 +563,66 @@ public sealed class DouyinClient : IDisposable
 
 
     /// <summary>
+    /// 接口 URL 模板：强校验接口直接照抄浏览器发过的 URL，只替换少量参数再重签。
+    /// 由 App 层注入（Core 不依赖 WebView2）。
+    /// </summary>
+    public Func<string, string?>? GetTemplate { get; set; }
+
+    /// <summary>模板缺失时去抓一次（参数是作品 id），返回是否抓到。</summary>
+    public Func<string, Task<bool>>? CaptureTemplate { get; set; }
+
+    /// <summary>模板失效时通知 App 层清掉。</summary>
+    public Action<string>? InvalidateTemplate { get; set; }
+
+    /// <summary>把模板 URL 里的某个参数换成新值（保留其余原样）。</summary>
+    private static string SetParam(string query, string name, string value)
+    {
+        string marker = name + "=";
+        string encoded = UrlCodec.Quote(value);
+
+        int i = query.StartsWith(marker, StringComparison.Ordinal)
+            ? 0
+            : query.IndexOf("&" + marker, StringComparison.Ordinal);
+
+        if (i < 0) return query.Length == 0 ? marker + encoded : query + "&" + marker + encoded;
+
+        int start = i == 0 ? 0 : i + 1;
+        int valueStart = start + marker.Length;
+        int end = query.IndexOf('&', valueStart);
+        if (end < 0) end = query.Length;
+
+        return query[..valueStart] + encoded + query[end..];
+    }
+
+    /// <summary>用模板拼出请求 URL：替换 aweme_id / cursor / count / msToken，然后重签。</summary>
+    private string? BuildFromTemplate(string template, string awemeId, long cursor, int count,
+        DouyinSession session, string? overrideParam = null, string? overrideValue = null)
+    {
+        int q = template.IndexOf('?');
+        if (q < 0) return null;
+
+        string head = template[..(q + 1)];
+        string query = template[(q + 1)..];
+
+        int cut = query.IndexOf("&a_bogus=", StringComparison.Ordinal);
+        if (cut >= 0) query = query[..cut];
+
+        if (!string.IsNullOrEmpty(awemeId)) query = SetParam(query, "aweme_id", awemeId);
+        if (!string.IsNullOrEmpty(overrideParam) && overrideValue is not null)
+            query = SetParam(query, overrideParam, overrideValue);
+        else
+        {
+            query = SetParam(query, "cursor", cursor.ToString());
+            query = SetParam(query, "count", count.ToString());
+        }
+
+        if (session.MsToken.Length > 0) query = SetParam(query, "msToken", session.MsToken);
+
+        string sign = _signer.SignQuery(query, "", "www.douyin.com");
+        return head + query + "&a_bogus=" + UrlCodec.Quote(sign);
+    }
+
+    /// <summary>
     /// 点赞 / 取消点赞。type=1 点赞，0 取消。必须登录。
     /// 路径 /aweme/v1/web/commit/item/digg/ 是网页版真实请求。
     /// </summary>
@@ -732,6 +792,26 @@ public sealed class DouyinClient : IDisposable
         string url = $"https://www.douyin.com/aweme/v1/web/comment/list/?{query}" +
                      $"&a_bogus={UrlCodec.Quote(abogus)}";
 
+        // 优先用「浏览器模板」拼 URL：强校验接口对参数集合/取值极敏感，
+        // 自己拼怎么调都差一点（webid 换成浏览器的仍失败），照抄浏览器最稳。
+        const string CommentPath = "/aweme/v1/web/comment/list/";
+        string? tpl = GetTemplate?.Invoke(CommentPath);
+        if (tpl is null && CaptureTemplate is not null)
+        {
+            Log?.Invoke("首次使用，正在抓取接口模板（约 5 秒）…");
+            if (await CaptureTemplate(awemeId)) tpl = GetTemplate?.Invoke(CommentPath);
+        }
+
+        if (tpl is not null)
+        {
+            string? fromTemplate = BuildFromTemplate(tpl, awemeId, cursor, count, session);
+            if (fromTemplate is not null)
+            {
+                url = fromTemplate;
+                Log?.Invoke("评论使用模板 URL");
+            }
+        }
+
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
 
         // 只发最小头集。实测（--webtest）：同样的 URL + 同样的 Cookie，
@@ -755,6 +835,13 @@ public sealed class DouyinClient : IDisposable
             }
 
             var page = ParseComments(body, cursor, count);
+
+            // 模板失效（又变空了）就清掉，下次重新抓
+            if (page.Comments.Count == 0 && tpl is not null)
+            {
+                InvalidateTemplate?.Invoke(CommentPath);
+                Log?.Invoke("模板可能失效，已清除");
+            }
 
             // 空 body 时把状态码和关键响应头打出来——服务端拒绝的原因通常在这里
             if (page.Comments.Count == 0)
