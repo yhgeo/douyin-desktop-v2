@@ -101,12 +101,15 @@ public sealed class DouyinClient : IDisposable
             sw.Stop();
 
             // 刷新凭据只该换 ttwid / msToken 这些游客材料，
-            // **不能把登录态弄丢**——之前这里直接新建会话，
-            // 于是推荐流失败一次重试就变成游客流（"刷一会儿就不个性化了"）。
+            // **不能把登录态和设备标识弄丢**——之前这里直接新建会话，
+            // 于是推荐流失败一次重试就变成游客流，评论/主页也开始返回空。
             if (previous is { IsLoggedIn: true })
             {
                 _session.LoginCookies = previous.LoginCookies;
                 _session.Uifid = previous.Uifid;
+                _session.Ttwid = previous.EffectiveTtwid;
+                _session.SvWebId = previous.EffectiveSvWebId;
+                _session.MsToken = previous.MsToken;
             }
 
             _session.Save();
@@ -155,7 +158,7 @@ public sealed class DouyinClient : IDisposable
         // 签名算的是原始 query；a_bogus 和指纹参数追加在签名之后
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
         string url = $"{FeedEndpoint}?{query}&a_bogus={UrlCodec.Quote(abogus)}" +
-                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+                     $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
@@ -313,7 +316,7 @@ public sealed class DouyinClient : IDisposable
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
         string url = $"https://www.douyin.com/aweme/v1/web/tab/feed/?{query}" +
                      $"&a_bogus={UrlCodec.Quote(abogus)}" +
-                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+                     $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
@@ -419,7 +422,7 @@ public sealed class DouyinClient : IDisposable
 
         // 浏览器的 verifyFp/fp 在 a_bogus 之后
         query += $"&a_bogus={UrlCodec.Quote(abogus)}" +
-                 $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+                 $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
 
         string url = $"https://www.douyin.com/aweme/v1/web/{endpoint}/?{query}";
 
@@ -502,7 +505,7 @@ public sealed class DouyinClient : IDisposable
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
         string url = $"https://www.douyin.com/aweme/v1/web/danmaku/get_v2/?{query}" +
                      $"&a_bogus={UrlCodec.Quote(abogus)}" +
-                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+                     $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
@@ -634,7 +637,7 @@ public sealed class DouyinClient : IDisposable
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
         string url = $"https://www.douyin.com/aweme/v1/web/commit/item/digg/?{query}" +
                      $"&a_bogus={UrlCodec.Quote(abogus)}" +
-                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+                     $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
@@ -702,7 +705,7 @@ public sealed class DouyinClient : IDisposable
         // 今天几次"优化"（改参数、改顺序、把 verifyFp 挪进签名）都让它失效了。
         string url = $"https://www.douyin.com/aweme/v1/web/comment/list/?{query}" +
                      $"&a_bogus={UrlCodec.Quote(abogus)}" +
-                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+                     $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
@@ -778,7 +781,7 @@ public sealed class DouyinClient : IDisposable
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
         string url = $"https://www.douyin.com/aweme/v1/web/comment/list/reply/?{query}" +
                      $"&a_bogus={UrlCodec.Quote(abogus)}" +
-                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+                     $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
@@ -909,7 +912,7 @@ public sealed class DouyinClient : IDisposable
         // a_bogus 是对不含自己的 query 算的，算完再拼进去；
         // verifyFp/fp 在这个接口里位于 a_bogus 之后（推荐流在之前）
         query += $"&a_bogus={UrlCodec.Quote(abogus)}" +
-                 $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+                 $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
 
         // 作者主页在 secsdk 的 webSign 策略表里，整条 query 还要再签一次
         string url = WebSign.SignUrl(
@@ -1033,7 +1036,7 @@ public sealed class DouyinClient : IDisposable
         string query = UrlCodec.ToQuery(ps);
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
         query += $"&a_bogus={UrlCodec.Quote(abogus)}" +
-                 $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+                 $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
 
         // 详情接口在 secsdk 的 webSign 策略表里
         string url = WebSign.SignUrl(

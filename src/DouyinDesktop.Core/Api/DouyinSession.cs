@@ -31,21 +31,53 @@ public sealed class DouyinSession
     /// </summary>
     public string Uifid { get; set; } = "";
 
-    [JsonIgnore]
+    /// <summary>从 LoginCookies 里取某个 Cookie 的值（取不到返回空串）。</summary>
+    public string CookieValue(string name)
+    {
+        if (string.IsNullOrEmpty(LoginCookies)) return "";
+
+        string prefix = name + "=";
+        foreach (string part in LoginCookies.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string kv = part.Trim();
+            if (kv.StartsWith(prefix, StringComparison.Ordinal)) return kv[prefix.Length..];
+        }
+        return "";
+    }
+
+    /// <summary>
+    /// uifid：**优先用 Cookie 里的**。
+    ///
+    /// 会话刷新（ttwid/msToken 过期重建）会重新生成字段值，
+    /// 但 Cookie 里那份是登录时抓的、和服务端一致。
+    /// 以前优先用字段，刷新后两者对不上，接口就开始返回空。
+    /// </summary>
     public string EffectiveUifid
     {
         get
         {
-            if (!string.IsNullOrEmpty(Uifid)) return Uifid;
+            string fromCookie = CookieValue("UIFID");
+            return fromCookie.Length > 0 ? fromCookie : Uifid;
+        }
+    }
 
-            // 兜底：从登录 Cookie 里翻一遍
-            foreach (string part in LoginCookies.Split(';', StringSplitOptions.RemoveEmptyEntries))
-            {
-                string kv = part.Trim();
-                if (kv.StartsWith("UIFID=", StringComparison.Ordinal))
-                    return kv[6..];
-            }
-            return "";
+    /// <summary>s_v_web_id（verifyFp / fp 参数）：优先 Cookie，保证和请求头一致。</summary>
+    public string EffectiveSvWebId
+    {
+        get
+        {
+            string fromCookie = CookieValue("s_v_web_id");
+            return fromCookie.Length > 0 ? fromCookie : SvWebId;
+        }
+    }
+
+    /// <summary>ttwid：优先 Cookie。</summary>
+    public string EffectiveTtwid
+    {
+        get
+        {
+            string fromCookie = CookieValue("ttwid");
+            return fromCookie.Length > 0 ? fromCookie : Ttwid;
         }
     }
 

@@ -2319,6 +2319,20 @@ public partial class MainWindow : Window
 
         var session = await _client.EnsureSessionAsync();
         session.LoginCookies = win.Cookies;
+
+        // 关键：把设备标识**对齐到刚抓到的 Cookie**。
+        // 原来只换 LoginCookies，Ttwid / SvWebId 还是登录前的旧值，
+        // 于是请求头（Cookie）和 URL 参数（verifyFp/fp）对不上，
+        // 服务端比对不一致就静默返回空 —— 表现就是"登录了但评论/主页全空"。
+        string ttwid = session.CookieValue("ttwid");
+        string svWebId = session.CookieValue("s_v_web_id");
+        string uifid = session.CookieValue("UIFID");
+
+        if (ttwid.Length > 0) session.Ttwid = ttwid;
+        if (svWebId.Length > 0) session.SvWebId = svWebId;
+        if (uifid.Length > 0) session.Uifid = uifid;
+
+        AppLog.Write($"登录后同步设备标识：ttwid {ttwid.Length} 字符，s_v_web_id {svWebId.Length} 字符，UIFID {uifid.Length} 字符");
         session.Save();
 
         _client.ResetLoginExpiredFlag();
