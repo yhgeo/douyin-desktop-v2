@@ -1526,21 +1526,36 @@ public partial class MainWindow : Window
         });
     }
 
+    /// <summary>
+    /// 切换重入保护。
+    ///
+    /// 播放失败时会「刷新地址重试 → 跳过下一条」，而 mpv 的 end-file 事件也是异步的，
+    /// 两个来源叠在一起会把 NextAsync 连续触发好几次，
+    /// 日志里能看到 1 秒内 loadfile 六七次——用户看到的就是"视频疯狂跳、然后全变成大众视频"。
+    /// </summary>
+    private bool _switching;
+
     private async Task NextAsync()
     {
-        if (_items.Count == 0) return;
+        if (_items.Count == 0 || _switching) return;
 
-        if (_index + 1 < _items.Count)
+        _switching = true;
+        try
         {
-            await PlayIndexAsync(_index + 1);
-            return;
-        }
+            if (_index + 1 < _items.Count)
+            {
+                await PlayIndexAsync(_index + 1);
+                return;
+            }
 
-        // 已经到缓冲区末尾：等下一批
-        SetStatus("正在加载更多…");
-        await LoadFeedAsync();
-        if (_index + 1 < _items.Count) await PlayIndexAsync(_index + 1);
-        else SetStatus("没有更多了");
+            // 已经到缓冲区末尾：等下一批
+            SetStatus("正在加载更多…");
+            await LoadFeedAsync();
+        }
+        finally
+        {
+            _switching = false;
+        }
     }
 
     private async Task PrevAsync()
