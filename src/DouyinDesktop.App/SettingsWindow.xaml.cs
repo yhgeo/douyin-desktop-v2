@@ -179,7 +179,8 @@ public partial class SettingsWindow : Window
     {
         if (HealthText is null) return;
 
-        HealthText.Text = $"登录状态：{LoginHealth.Describe()}（{LoginHealth.DescribeTime()}）";
+        string expiry = SessionExpiry.Describe(_client.Session?.LoginCookies);
+        HealthText.Text = $"登录状态：{LoginHealth.Describe()}　·　{expiry}";
         HealthText.Foreground = LoginHealth.Current == LoginHealth.State.Expired
             ? new System.Windows.Media.SolidColorBrush(
                 System.Windows.Media.Color.FromRgb(0xFE, 0x2C, 0x55))

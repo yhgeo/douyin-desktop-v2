@@ -1573,13 +1573,48 @@ public partial class MainWindow : Window
     }
 
     private DateTime _lastHealthCheck = DateTime.MinValue;
+    private bool _browserSyncTried;
+
+    /// <summary>
+    /// 从内置浏览器同步一次登录凭据（浏览器那份会自己续期）。
+    /// 每次运行最多试一次，避免反复起浏览器内核。
+    /// </summary>
+    private async Task<bool> TryRefreshFromBrowserAsync()
+    {
+        if (_browserSyncTried) return false;
+        _browserSyncTried = true;
+
+        var session = _client.Session;
+        if (session is null) return false;
+
+        SetStatus("正在从浏览器同步登录状态…");
+        string? cookies = await WebCookieSync.ReadAsync();
+
+        if (string.IsNullOrEmpty(cookies) || !cookies.Contains("sessionid="))
+        {
+            AppLog.Write("浏览器里没有可用的登录状态");
+            SetStatus("浏览器里也没有登录状态，需要重新扫码");
+            return false;
+        }
+
+        if (cookies == session.LoginCookies) return false;
+
+        session.LoginCookies = cookies;
+        session.Save();
+        AppLog.Write("已从浏览器同步登录状态（" + SessionExpiry.Describe(cookies) + "）");
+        return true;
+    }
 
     /// <summary>
     /// 视频加载好后在后台拉一小页评论，用来判断登录态是否还有效。
     ///
     /// 抖音对过期登录态只返回空 body、不给错误码，所以"能不能读到评论"
-    /// 是唯一可靠的判据。结果写到 LoginHealth，设置页读它显示。
-    /// 节流：最多一分钟一次，避免每条视频都发请求。
+    /// 是唯一可靠的判据。结果写到 LoginHealth，设置页和右下角读它显示。
+    ///
+    /// 什么时候会去起浏览器同步：只在这两种情况下 ——
+    ///   1. 凭据快过期（不到 12 小时）
+    ///   2. 评论读不到、判定已过期
+    /// 平时启动**不会**碰浏览器。
     /// </summary>
     private async Task CheckLoginHealthAsync()
     {
@@ -1596,10 +1631,33 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(id)) return;
 
         _lastHealthCheck = DateTime.Now;
+
+        // 快过期就先同步，省得等它真的失效
+        if (!_browserSyncTried
+            && SessionExpiry.IsNearExpiry(session.LoginCookies, TimeSpan.FromHours(12)))
+        {
+            await TryRefreshFromBrowserAsync();
+        }
+
         try
         {
             var page = await _client.GetCommentsAsync(id, 0, 5);
-            LoginHealth.Set(page.Comments.Count > 0 ? LoginHealth.State.Ok : LoginHealth.State.Expired);
+
+            if (page.Comments.Count > 0)
+            {
+                LoginHealth.Set(LoginHealth.State.Ok);
+                return;
+            }
+
+            // 读不到 → 先试着从浏览器同步一次，成了再验一次
+            if (await TryRefreshFromBrowserAsync())
+            {
+                page = await _client.GetCommentsAsync(id, 0, 5);
+                LoginHealth.Set(page.Comments.Count > 0 ? LoginHealth.State.Ok : LoginHealth.State.Expired);
+                return;
+            }
+
+            LoginHealth.Set(LoginHealth.State.Expired);
         }
         catch
         {
@@ -2148,6 +2206,7 @@ public partial class MainWindow : Window
         session.Save();
 
         _client.ResetLoginExpiredFlag();
+        _browserSyncTried = false;                    // 新凭据，允许以后再同步一次
         LoginHealth.Set(LoginHealth.State.Unknown);   // 等下次加载视频时重新检查
         SetStatus("登录成功，正在刷新推荐…");
         await LoadFeedAsync(reset: true);
