@@ -43,17 +43,6 @@ public static class ApiTemplate
         }
     }
 
-    /// <summary>模板失效时清掉，下次重新抓。</summary>
-    public static void Invalidate(string path)
-    {
-        var map = Load();
-        if (map.Remove(path))
-        {
-            try { File.WriteAllText(FilePath, JsonSerializer.Serialize(map)); }
-            catch { /* 删不掉就算了，下次抓到会覆盖 */ }
-        }
-    }
-
     private static Dictionary<string, string> Load()
     {
         if (_cache is not null) return _cache;

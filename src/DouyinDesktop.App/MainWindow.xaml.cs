@@ -98,7 +98,6 @@ public partial class MainWindow : Window
         // 强校验接口走「浏览器模板」：平时不碰浏览器，模板缺失/失效才抓一次
         _client.GetTemplate = ApiTemplate.Get;
         _client.CaptureTemplate = id => TemplateFetcher.CaptureAsync(id);
-        _client.InvalidateTemplate = ApiTemplate.Invalidate;
         _healthHandler = () => Dispatcher.BeginInvoke(UpdateExpiredBadge);
         LoginHealth.Changed += _healthHandler;
         Closed += (_, _) => LoginHealth.Changed -= _healthHandler;

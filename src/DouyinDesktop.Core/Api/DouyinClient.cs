@@ -574,9 +574,6 @@ public sealed class DouyinClient : IDisposable
     /// <summary>模板缺失时去抓一次（参数是作品 id），返回是否抓到。</summary>
     public Func<string, Task<bool>>? CaptureTemplate { get; set; }
 
-    /// <summary>模板失效时通知 App 层清掉。</summary>
-    public Action<string>? InvalidateTemplate { get; set; }
-
     /// <summary>上次尝试抓模板的时间（失败后冷却 5 分钟，避免每次都卡界面）。</summary>
     private DateTime _lastCaptureAttempt = DateTime.MinValue;
 
