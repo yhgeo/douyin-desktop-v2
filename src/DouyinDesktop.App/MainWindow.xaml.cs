@@ -70,8 +70,6 @@ public partial class MainWindow : Window
     private bool _authorMode;
     private bool _muted;
     private int _volume = 100;
-    /// <summary>浏览器通道（设置里开启才创建，懒加载）。</summary>
-    private WebChannel? _webChannel;
 
     // ================= 弹幕 =================
     private int _danmakuSubId = -1;
@@ -97,13 +95,6 @@ public partial class MainWindow : Window
         CommentList.ItemsSource = _commentVms;
         _client.Log += msg => Dispatcher.BeginInvoke(() => PushStatus(msg));
         Surface.HandleCreated += OnSurfaceReady;
-
-        // 浏览器通道：只挂委托，真正启动要等第一次请求（懒加载，平时零开销）
-        if (_settings.WebChannel)
-        {
-            _webChannel = new WebChannel();
-            _client.WebFetch = url => _webChannel!.FetchAsync(url);
-        }
     }
 
     /// <summary>
@@ -2082,7 +2073,6 @@ public partial class MainWindow : Window
             LastSession.Save(_index, _items);
 
         try { await _proxy.DisposeAsync(); } catch { /* 收尾不抛 */ }
-        try { _webChannel?.Dispose(); } catch { /* 收尾不抛 */ }
         if (_mpv is null) return;
 
         // mpv 是独立进程，不显式 quit 会留在后台

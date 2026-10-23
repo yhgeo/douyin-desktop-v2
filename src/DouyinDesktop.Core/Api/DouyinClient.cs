@@ -546,36 +546,7 @@ public sealed class DouyinClient : IDisposable
     }
 
     /// <summary>
-    /// 浏览器通道：接口被风控挡掉（返回空 body）时，用隐藏 WebView2 在页面里 fetch。
-    /// 由 App 层注入，Core 不依赖 WebView2。
-    /// </summary>
-    public Func<string, Task<string?>>? WebFetch { get; set; }
-
-    /// <summary>详情请求被挡时改走浏览器通道。</summary>
-    private async Task<Aweme?> DetailViaWebAsync(string url)
-    {
-        if (WebFetch is null) return null;
-
-        string? body = await WebFetch(url);
-        if (string.IsNullOrEmpty(body)) return null;
-
-        try
-        {
-            using var doc = JsonDocument.Parse(body);
-            if (!doc.RootElement.TryGetProperty("aweme_detail", out var d)
-                || d.ValueKind != JsonValueKind.Object)
-                return null;
-
-            Log?.Invoke("详情（浏览器通道）");
-            return d.Deserialize<Aweme>(JsonOptions);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>点赞 / 取消点赞。type=1 点赞，0 取消。必须登录。</summary>
+    /// 点赞 / 取消点赞。type=1 点赞，0 取消。必须登录。
     /// 路径 /aweme/v1/web/commit/item/digg/ 是网页版真实请求。
     /// </summary>
     public async Task<bool> DiggAsync(string awemeId, bool like, CancellationToken ct = default)
@@ -737,22 +708,6 @@ public sealed class DouyinClient : IDisposable
             }
 
             var page = ParseComments(body, cursor, count);
-
-            // 纯 C# 请求被风控挡掉时（返回空 body），改走浏览器通道：
-            // 让抖音自己的 JS 加签名，我们只管收结果。
-            if (page.Comments.Count == 0 && WebFetch is not null)
-            {
-                string? webBody = await WebFetch(url);
-                if (!string.IsNullOrEmpty(webBody))
-                {
-                    var viaWeb = ParseComments(webBody, cursor, count);
-                    if (viaWeb.Comments.Count > 0)
-                    {
-                        Log?.Invoke($"评论（浏览器通道）{viaWeb.Comments.Count} 条 / 共 {viaWeb.Total}");
-                        return viaWeb;
-                    }
-                }
-            }
 
             Log?.Invoke(page.Comments.Count == 0
                 ? $"评论 0 条，原始返回：{body[..Math.Min(300, body.Length)]}"
@@ -948,20 +903,6 @@ public sealed class DouyinClient : IDisposable
 
             var items = ParseAwemeList(body);
 
-            // 被风控挡掉时改走浏览器通道
-            if (items.Count == 0 && WebFetch is not null)
-            {
-                string? webBody = await WebFetch(url);
-                if (!string.IsNullOrEmpty(webBody))
-                {
-                    var viaWeb = ParseAwemeList(webBody);
-                    if (viaWeb.Count > 0)
-                    {
-                        Log?.Invoke($"用户作品（浏览器通道）{viaWeb.Count} 条");
-                        return new FeedResult(viaWeb, true, "", sw.ElapsedMilliseconds);
-                    }
-                }
-            }
 
             if (items.Count == 0)
             {
@@ -1086,7 +1027,7 @@ public sealed class DouyinClient : IDisposable
                 || d.ValueKind != JsonValueKind.Object)
             {
                 Log?.Invoke("详情里没有 aweme_detail");
-                return await DetailViaWebAsync(url);
+                return null;
             }
 
             var item = d.Deserialize<Aweme>(JsonOptions);
