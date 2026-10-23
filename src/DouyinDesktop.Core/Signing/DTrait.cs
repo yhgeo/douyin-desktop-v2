@@ -72,6 +72,16 @@ public static class DTrait
     /// <param name="cores">CPU 核数</param>
     /// <param name="memory">设备内存（GB）</param>
     public static string BuildHeader(string path, string ua, int screenW, int screenH, int cores, int memory)
+        => BuildHeader(path, ua, screenW, screenH, cores, memory, null, null);
+
+    /// <summary>
+    /// 用服务端下发的公钥生成头。
+    ///
+    /// 内置的 d0 公钥只对**未登录的新档案**有效；登录态下服务端会下发 d1，
+    /// 头的前缀必须是 d1 且用对应公钥加密，否则验签失败。
+    /// </summary>
+    public static string BuildHeader(string path, string ua, int screenW, int screenH,
+        int cores, int memory, string? pk1Pem, string? pk1Version)
     {
         string blob = GetBlob(ua, screenW, screenH, cores, memory);
 
@@ -94,25 +104,33 @@ public static class DTrait
             aes.IV = iv;
             aes.Mode = CipherMode.CBC;
             aes.Padding = PaddingMode.PKCS7;
+            byte[] plain = Encoding.UTF8.GetBytes(payload);
             using var enc = aes.CreateEncryptor();
-            cipher = enc.TransformFinalBlock(Encoding.UTF8.GetBytes(payload), 0, Encoding.UTF8.GetByteCount(payload));
+            cipher = enc.TransformFinalBlock(plain, 0, plain.Length);
         }
 
         byte[] part2 = new byte[iv.Length + cipher.Length];
         iv.CopyTo(part2, 0);
         cipher.CopyTo(part2, iv.Length);
 
-        string pk1 = Encoding.ASCII.GetString(Convert.FromBase64String(BuiltinPk1B64));
+        string pem = string.IsNullOrWhiteSpace(pk1Pem)
+            ? Encoding.ASCII.GetString(Convert.FromBase64String(BuiltinPk1B64))
+            : pk1Pem;
+        string version = string.IsNullOrWhiteSpace(pk1Version) ? Pk1Version : pk1Version;
 
         byte[] encKey;
         using (var rsa = RSA.Create())
         {
-            rsa.ImportFromPem(pk1);
+            rsa.ImportFromPem(pem);
             encKey = rsa.Encrypt(Encoding.ASCII.GetBytes(keyHex), RSAEncryptionPadding.Pkcs1);
         }
 
-        return $"{Pk1Version}_{Convert.ToBase64String(encKey)}_{Convert.ToBase64String(part2)}";
+        return $"{version}_{Convert.ToBase64String(encKey)}_{Convert.ToBase64String(part2)}";
     }
+
+    /// <summary>调试用：直接拿到设备特征 blob，和参考实现逐字节比对。</summary>
+    public static string BuildBlob(string ua, int screenW, int screenH, int cores, int memory)
+        => GetBlob(ua, screenW, screenH, cores, memory);
 
     /// <summary>设备特征 blob（同一台设备可以复用，按 UA/分辨率缓存）。</summary>
     private static string GetBlob(string ua, int screenW, int screenH, int cores, int memory)

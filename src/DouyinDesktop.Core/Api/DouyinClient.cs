@@ -1,3 +1,4 @@
+using System.Text;
 using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
@@ -111,6 +112,14 @@ public sealed class DouyinClient : IDisposable
 
     // ================= 推荐流 =================
 
+    /// <summary>会话就绪后顺手把 dtrait 公钥取好（只取一次，失败就用内置 d0）。</summary>
+    private async Task<DouyinSession> ReadyAsync(CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+        await EnsureDTraitKeyAsync(session, ct);
+        return session;
+    }
+
     /// <summary>
     /// 拉一批推荐。presentedIds 传已展示过的 id，让服务端避开重复。
     /// 空结果会自动刷一次凭据重试——多数是风控挡了。
@@ -118,7 +127,7 @@ public sealed class DouyinClient : IDisposable
     public async Task<FeedResult> GetFeedAsync(
         int count = 10, IEnumerable<string>? presentedIds = null, CancellationToken ct = default)
     {
-        var session = await EnsureSessionAsync(ct: ct);
+        var session = await ReadyAsync(ct);
 
         // 只带最近 50 个：全带上会让 URL 越来越长，几千字符容易被服务端拒
         string presented = presentedIds is null
@@ -254,7 +263,7 @@ public sealed class DouyinClient : IDisposable
     /// </summary>
     public async Task<FeedResult> GetTabFeedAsync(int count = 20, CancellationToken ct = default)
     {
-        var session = await EnsureSessionAsync(ct: ct);
+        var session = await ReadyAsync(ct);
         string bv = _profile.BrowserVersion;
 
         var ps = new List<KeyValuePair<string, string>>
@@ -344,7 +353,7 @@ public sealed class DouyinClient : IDisposable
         int count = 10, int refreshIndex = 2, string endpoint = "tab/feed",
         CancellationToken ct = default)
     {
-        var session = await EnsureSessionAsync(ct: ct);
+        var session = await ReadyAsync(ct);
         string bv = _profile.BrowserVersion;
 
         var ps = new List<KeyValuePair<string, string>>
@@ -468,7 +477,7 @@ public sealed class DouyinClient : IDisposable
     public async Task<DanmakuPage> GetDanmakuAsync(
         string awemeId, long startMs, long endMs, CancellationToken ct = default)
     {
-        var session = await EnsureSessionAsync(ct: ct);
+        var session = await ReadyAsync(ct);
 
         var ps = new List<KeyValuePair<string, string>>
         {
@@ -572,7 +581,7 @@ public sealed class DouyinClient : IDisposable
     /// <summary>点赞请求本体，返回 status_code（-1 表示请求失败）。</summary>
     private async Task<int> DiggRawAsync(string awemeId, bool like, CancellationToken ct)
     {
-        var session = await EnsureSessionAsync(ct: ct);
+        var session = await ReadyAsync(ct);
 
         var ps = new List<KeyValuePair<string, string>>
         {
@@ -631,7 +640,7 @@ public sealed class DouyinClient : IDisposable
     public async Task<CommentPage> GetCommentsAsync(
         string awemeId, long cursor = 0, int count = 20, CancellationToken ct = default)
     {
-        var session = await EnsureSessionAsync(ct: ct);
+        var session = await ReadyAsync(ct);
 
         // 参数**顺序**照抄抓包（网页版顺序）。签名是对这串原文算的，
         // 顺序不同 → 服务端复算出来的串不同 → 直接返回空 body。
@@ -725,7 +734,7 @@ public sealed class DouyinClient : IDisposable
     public async Task<CommentPage> GetCommentRepliesAsync(
         string awemeId, string commentId, long cursor = 0, int count = 20, CancellationToken ct = default)
     {
-        var session = await EnsureSessionAsync(ct: ct);
+        var session = await ReadyAsync(ct);
 
         var ps = new List<KeyValuePair<string, string>>
         {
@@ -820,7 +829,7 @@ public sealed class DouyinClient : IDisposable
     {
         if (string.IsNullOrEmpty(secUid)) return FeedResult.Fail("缺少 sec_uid");
 
-        var session = await EnsureSessionAsync(ct: ct);
+        var session = await ReadyAsync(ct);
         string bv = _profile.BrowserVersion;
 
         // 参数顺序照 2026-08-16 的抓包（46 项）。
@@ -983,7 +992,7 @@ public sealed class DouyinClient : IDisposable
     /// </summary>
     public async Task<Aweme?> GetAwemeDetailAsync(string awemeId, CancellationToken ct = default)
     {
-        var session = await EnsureSessionAsync(ct: ct);
+        var session = await ReadyAsync(ct);
         string bv = _profile.BrowserVersion;
 
         var ps = new List<KeyValuePair<string, string>>
@@ -1089,11 +1098,62 @@ public sealed class DouyinClient : IDisposable
         {
             req.Headers.TryAddWithoutValidation("x-tt-session-dtrait",
                 DTrait.BuildHeader(path, _profile.UserAgent, _profile.ScreenWidth,
-                    _profile.ScreenHeight, _profile.CpuCores, _profile.DeviceMemory));
+                    _profile.ScreenHeight, _profile.CpuCores, _profile.DeviceMemory,
+                    _dtraitKey?.Pem, _dtraitKey?.Version));
         }
         catch (Exception ex)
         {
             Log?.Invoke("dtrait 生成失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// dtrait 的 RSA 公钥。内置 d0 只对未登录的新档案有效，
+    /// 登录态要从服务端拿 d1（同一个接口，body 用 & 连接）。
+    /// </summary>
+    private (string Pem, string Version)? _dtraitKey;
+
+    private async Task EnsureDTraitKeyAsync(DouyinSession session, CancellationToken ct)
+    {
+        if (_dtraitKey is not null) return;
+
+        try
+        {
+            string url = "https://www.douyin.com/passport/ticket_guard/get_client_cert/" +
+                         "?aid=6383&type=trait&sdk_version=1.0.0.381&is_from_ttaccountsdk=1";
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent("server_data=1&need_session_dtrait=1",
+                    Encoding.UTF8, "application/x-www-form-urlencoded"),
+            };
+            req.Headers.TryAddWithoutValidation("Cookie", session.CookieHeader);
+            req.Headers.TryAddWithoutValidation("User-Agent", _profile.UserAgent);
+            req.Headers.TryAddWithoutValidation("Referer", "https://www.douyin.com/");
+            req.Headers.TryAddWithoutValidation("Origin", "https://www.douyin.com");
+            req.Headers.TryAddWithoutValidation("accept", "application/json");
+
+            string csrf = CookieValue(session.LoginCookies, "passport_csrf_token");
+            if (csrf.Length > 0)
+                req.Headers.TryAddWithoutValidation("x-tt-passport-csrf-token", csrf);
+
+            using var resp = await _http.SendAsync(req, ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Object) return;
+
+            string pk1B64 = data.TryGetProperty("x-tt-session-dtrait-pk1", out var p) ? p.GetString() ?? "" : "";
+            string ver = data.TryGetProperty("x-tt-session-dtrait-pk1-version", out var v) ? v.GetString() ?? "" : "";
+            if (pk1B64.Length == 0) return;
+
+            _dtraitKey = (Encoding.UTF8.GetString(Convert.FromBase64String(pk1B64)), ver);
+            Log?.Invoke($"dtrait 公钥已获取（{ver}）");
+        }
+        catch (Exception ex)
+        {
+            Log?.Invoke("dtrait 公钥获取失败，用内置 d0：" + ex.Message);
         }
     }
 
