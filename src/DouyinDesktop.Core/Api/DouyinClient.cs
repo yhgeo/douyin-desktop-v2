@@ -533,6 +533,18 @@ public sealed class DouyinClient : IDisposable
         }
     }
 
+    /// <summary>从 "a=1; b=2" 这种 Cookie 串里取某个键的值。</summary>
+    private static string CookieValue(string cookies, string key)
+    {
+        foreach (string part in cookies.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string kv = part.Trim();
+            if (kv.StartsWith(key + "=", StringComparison.Ordinal))
+                return kv[(key.Length + 1)..];
+        }
+        return "";
+    }
+
     /// <summary>
     /// 点赞 / 取消点赞。type=1 点赞，0 取消。必须登录。
     /// 路径 /aweme/v1/web/commit/item/digg/ 是网页版真实请求。
@@ -566,6 +578,12 @@ public sealed class DouyinClient : IDisposable
         req.Headers.Remove("Referer");
         req.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/video/{awemeId}");
 
+        // 写操作（点赞/关注/评论）必须带 CSRF 头，值就是 Cookie 里的 passport_csrf_token。
+        // 少了它服务端一律回 status_code=8「用户未登录」，很容易误判成没登录。
+        string csrf = CookieValue(session.LoginCookies, "passport_csrf_token");
+        if (csrf.Length > 0)
+            req.Headers.TryAddWithoutValidation("x-secsdk-csrf-token", csrf);
+
         try
         {
             using var resp = await _http.SendAsync(req, ct);
@@ -578,7 +596,9 @@ public sealed class DouyinClient : IDisposable
 
             using var doc = JsonDocument.Parse(body);
             int code = doc.RootElement.TryGetProperty("status_code", out var sc) ? sc.GetInt32() : -1;
-            Log?.Invoke($"点赞 {(like ? "赞" : "取消")} status_code={code}");
+            Log?.Invoke(code == 0
+                ? $"点赞 {(like ? "赞" : "取消")}成功"
+                : $"点赞 status_code={code}：{body[..Math.Min(240, body.Length)]}");
             return code == 0;
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)

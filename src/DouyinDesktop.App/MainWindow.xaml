@@ -145,9 +145,12 @@
                             </ScrollViewer>
 
                             <StackPanel x:Name="StatsPanel" Orientation="Horizontal" Margin="0,0,0,18">
-                                <TextBlock x:Name="LikeText" Style="{StaticResource Stat}"
-                                           Cursor="Hand" ToolTip="点赞 / 取消（快捷键 X）"
-                                           MouseLeftButtonUp="OnLikeClick" />
+                                <!-- 包一层 Border：TextBlock 没背景时点击热区只有字形那点大，
+                                     鼠标经常点不中 -->
+                                <Border Background="Transparent" Cursor="Hand"
+                                        Padding="2,0" MouseLeftButtonUp="OnLikeClick">
+                                    <TextBlock x:Name="LikeText" Style="{StaticResource Stat}" />
+                                </Border>
                                 <TextBlock x:Name="CommentText" Style="{StaticResource Stat}" />
                                 <TextBlock x:Name="ShareText" Style="{StaticResource Stat}" />
                             </StackPanel>

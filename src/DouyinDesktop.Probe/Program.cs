@@ -85,6 +85,21 @@ if (args.Length > 0 && args[0] == "session")
     return same == Math.Min(5, loaded.Items.Count) ? 0 : 1;
 }
 
+// 点赞接口试探：用不存在的作品 id，不会在账号上留下真实点赞，
+// 只看请求形状对不对（签名/方法/参数名）。
+if (args.Length > 0 && args[0] == "diggtest")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var cd = DouyinClient.Create();
+    cd.Log += m => Console.WriteLine("    " + m);
+
+    Console.WriteLine("用假 id 试点赞：");
+    await cd.DiggAsync("7000000000000000000", true);
+    Console.WriteLine("用假 id 试取消：");
+    await cd.DiggAsync("7000000000000000000", false);
+    return 0;
+}
+
 // 弹幕接口试探：dotnet run --project src/DouyinDesktop.Probe -- danmaku
 // 路径是抓包确认的，参数还在猜——先看返回什么
 if (args.Length > 0 && args[0] == "danmaku")

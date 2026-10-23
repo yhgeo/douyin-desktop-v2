@@ -622,6 +622,15 @@ public partial class MainWindow : Window
         var ct = cts.Token;
         try
         {
+            // 等真正开播再拉弹幕：切换瞬间视频还在建连接/缓冲，
+            // 这时候连发三个弹幕请求会抢带宽，起播明显变慢。
+            int waited = 0;
+            while (!ct.IsCancellationRequested && (_mpv?.Position ?? 0) <= 0.05 && waited < 4000)
+            {
+                await Task.Delay(200, ct);
+                waited += 200;
+            }
+
             while (!ct.IsCancellationRequested)
             {
                 double posSec = _mpv?.Position ?? 0;
@@ -860,6 +869,20 @@ public partial class MainWindow : Window
             AppLog.Write("刷新播放地址失败：" + ex.Message);
             return null;
         }
+    }
+
+    /// <summary>
+    /// 切视频的节流：连按方向键时，上一条还没起播就跳下一条，
+    /// 会出现"点了几下只前进一格"或者干脆加载失败。300ms 内只认一次。
+    /// </summary>
+    private DateTime _lastSwitchAt = DateTime.MinValue;
+
+    private bool SwitchThrottled()
+    {
+        var now = DateTime.UtcNow;
+        if (now - _lastSwitchAt < TimeSpan.FromMilliseconds(300)) return true;
+        _lastSwitchAt = now;
+        return false;
     }
 
     // ================= 点赞 =================
@@ -1725,10 +1748,12 @@ public partial class MainWindow : Window
             switch (action)
             {
                 case "next":
+                    if (SwitchThrottled()) break;
                     await NextAsync();
                     break;
 
                 case "prev":
+                    if (SwitchThrottled()) break;
                     await PrevAsync();
                     break;
 
