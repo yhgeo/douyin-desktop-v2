@@ -642,10 +642,6 @@ public sealed class DouyinClient : IDisposable
             new("cursor", cursor.ToString()),
             new("count", count.ToString()),
             new("item_type", "0"),
-            // 这两个是空值字段，浏览器确实会发；签名输入里也不能少
-            new("whale_cut_token", ""),
-            new("cut_version", "1"),
-            new("rcFT", ""),
         };
         ps.AddRange(_profile.PlatformParams());
         ps.Add(new("webid", _profile.WebId));
@@ -675,7 +671,9 @@ public sealed class DouyinClient : IDisposable
             }
 
             var page = ParseComments(body, cursor, count);
-            Log?.Invoke($"评论 {page.Comments.Count} 条 / 共 {page.Total}");
+            Log?.Invoke(page.Comments.Count == 0
+                ? $"评论 0 条，原始返回：{body[..Math.Min(300, body.Length)]}"
+                : $"评论 {page.Comments.Count} 条 / 共 {page.Total}");
             return page;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
