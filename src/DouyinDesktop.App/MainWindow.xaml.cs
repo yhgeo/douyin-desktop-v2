@@ -152,6 +152,9 @@ public partial class MainWindow : Window
     {
         if (ProgressFill is null || ProgressTrack is null) return;
 
+        // 顺手同步登录过期徽章：不依赖事件，避免"状态改了但界面没反应"
+        UpdateExpiredBadge();
+
         double pos = _mpv?.Position ?? 0;
         double total = _mpv?.Duration ?? 0;
 
@@ -1688,18 +1691,21 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // 判定过期前先试着从浏览器同步一次，成了就再验一次
+            // 先亮提示，再去后台尝试救回来——不要等浏览器起完才让用户看到
+            LoginHealth.Set(LoginHealth.State.Expired);
+            AppLog.Write("[登录检查] 判定登录已过期");
+
             if (await TryRefreshFromBrowserAsync())
             {
                 page = await _client.GetCommentsAsync(id, 0, 5);
                 bool ok = page.Comments.Count > 0;
                 AppLog.Write($"[登录检查] 同步后复查：{(ok ? "正常" : "仍然为空")}");
-                if (ok) _emptyStreak = 0;
-                LoginHealth.Set(ok ? LoginHealth.State.Ok : LoginHealth.State.Expired);
-                return;
+                if (ok)
+                {
+                    _emptyStreak = 0;
+                    LoginHealth.Set(LoginHealth.State.Ok);
+                }
             }
-
-            LoginHealth.Set(LoginHealth.State.Expired);
         }
         catch
         {
