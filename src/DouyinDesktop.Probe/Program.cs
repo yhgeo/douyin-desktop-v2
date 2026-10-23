@@ -97,6 +97,13 @@ if (args.Length > 0 && args[0] == "comments")
 
     var item = f.Items[0];
     string targetId = args.Length > 1 ? args[1] : item.Id;
+
+    // 加 guest 参数就清掉登录 Cookie，用来对比"游客 vs 登录"两种状态下评论接口的表现
+    if (args.Contains("guest") && cd.Session is not null)
+    {
+        cd.Session.LoginCookies = "";
+        Console.WriteLine("（已清空登录 Cookie，按游客态请求）");
+    }
     Console.WriteLine($"作品 {targetId} 评论数 {item.Statistics?.CommentCount}");
     var page = await cd.GetCommentsAsync(targetId, 0, 20);
     Console.WriteLine($"拿到 {page.Comments.Count} 条 / 共 {page.Total}");

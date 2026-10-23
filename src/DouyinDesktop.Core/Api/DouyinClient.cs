@@ -652,13 +652,17 @@ public sealed class DouyinClient : IDisposable
         ps.AddRange(_profile.PlatformParams());
         ps.Add(new("webid", _profile.WebId));
         ps.Add(new("uifid", session.EffectiveUifid));
+        // verifyFp / fp 必须在 a_bogus **之前**参与签名。
+        // 原来是把它们拼在 a_bogus 后面，等于签的内容和发出去的不一致——
+        // 推荐流侥幸能过，评论这种校验严的端点直接返回空 body。
+        ps.Add(new("verifyFp", session.SvWebId));
+        ps.Add(new("fp", session.SvWebId));
         ps.Add(new("msToken", session.MsToken));
 
         string query = UrlCodec.ToQuery(ps);
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
         string url = $"https://www.douyin.com/aweme/v1/web/comment/list/?{query}" +
-                     $"&a_bogus={UrlCodec.Quote(abogus)}" +
-                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+                     $"&a_bogus={UrlCodec.Quote(abogus)}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
