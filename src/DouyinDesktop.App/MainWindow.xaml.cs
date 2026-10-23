@@ -121,9 +121,32 @@ public partial class MainWindow : Window
     private void OnExpiredBadgeClick(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
-        _ = HandleLoginAsync();
+        _ = ReloginFreshAsync();
     }
 
+    /// <summary>
+    /// 判定过期后的重新登录：**先把内置浏览器的登录状态清掉**再弹扫码。
+    ///
+    /// 不清的话，登录窗口一打开页面就是"已登录"→ 窗口一闪就关 →
+    /// 抓回来还是那份过期 Cookie，等于没重新登录（用户踩过两次）。
+    /// </summary>
+    private async Task ReloginFreshAsync()
+    {
+        SetStatus("正在清理旧的登录状态…");
+        ClearWebViewProfile();
+
+        var session = _client.Session;
+        if (session is not null)
+        {
+            session.LoginCookies = "";
+            session.Uifid = "";
+            session.Save();
+        }
+
+        _browserSyncTried = false;
+        LoginHealth.Set(LoginHealth.State.Guest);
+        await HandleLoginAsync();
+    }
     /// <summary>按当前播放位置画底部进度条。时长优先取作品数据，拿不到就用 0（不画）。</summary>
     private void UpdateProgress()
     {
@@ -1630,6 +1653,16 @@ public partial class MainWindow : Window
         string id = CurrentId;
         if (string.IsNullOrEmpty(id)) return;
 
+        // 没评论的作品不能用来判断登录态——空评论不等于登录过期。
+        // 之前没做这个判断，刷到一条零评论的视频就会误报"登录已过期"。
+        var current = _index >= 0 && _index < _items.Count ? _items[_index] : null;
+        if (current?.Statistics?.CommentCount is not > 0)
+        {
+            if (LoginHealth.Current == LoginHealth.State.Unknown)
+                LoginHealth.Set(LoginHealth.State.Ok);   // 至少能拉到视频，先当正常
+            return;
+        }
+
         _lastHealthCheck = DateTime.Now;
 
         // 快过期就先同步，省得等它真的失效
@@ -2192,6 +2225,22 @@ public partial class MainWindow : Window
     /// <summary>扫码登录。返回是否真的登上了（取消或失败返回 false）。</summary>
     private async Task<bool> HandleLoginAsync()
     {
+        // 判定过期时，必须先把浏览器里的旧登录清掉再弹窗——
+        // 否则页面一打开就是"已登录"，窗口一闪就关，抓回来还是过期 Cookie。
+        // （设置页的「重新登录」和右下角徽章都走这里）
+        if (LoginHealth.Current == LoginHealth.State.Expired)
+        {
+            ClearWebViewProfile();
+            var old = _client.Session;
+            if (old is not null)
+            {
+                old.LoginCookies = "";
+                old.Uifid = "";
+                old.Save();
+            }
+            _browserSyncTried = false;
+        }
+
         var win = new LoginWindow { Owner = this };
         win.ShowDialog();
 
