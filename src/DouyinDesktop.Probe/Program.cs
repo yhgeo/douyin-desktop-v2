@@ -96,8 +96,9 @@ if (args.Length > 0 && args[0] == "comments")
     if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
 
     var item = f.Items[0];
-    Console.WriteLine($"作品 {item.Id} 评论数 {item.Statistics?.CommentCount}");
-    var page = await cd.GetCommentsAsync(item.Id, 0, 20);
+    string targetId = args.Length > 1 ? args[1] : item.Id;
+    Console.WriteLine($"作品 {targetId} 评论数 {item.Statistics?.CommentCount}");
+    var page = await cd.GetCommentsAsync(targetId, 0, 20);
     Console.WriteLine($"拿到 {page.Comments.Count} 条 / 共 {page.Total}");
     foreach (var c in page.Comments.Take(2)) Console.WriteLine("    · " + c.Text);
     return 0;

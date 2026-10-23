@@ -57,17 +57,34 @@ public sealed class DouyinSession
     [JsonIgnore] public bool IsStale
         => !IsLoggedIn && DateTimeOffset.Now - CreatedAt > TimeSpan.FromDays(7);
 
-    /// <summary>拼给请求头用的完整 Cookie 串，不落盘（由上面几个字段拼出来就行）。</summary>
+    /// <summary>
+    /// 拼给请求头用的完整 Cookie 串。
+    ///
+    /// 必须按 key 去重：登录时从 WebView2 抓回来的 Cookie 里**本身就带 ttwid / s_v_web_id**，
+    /// 如果无脑拼在会话字段后面，请求头里就会出现两个 ttwid、两个 s_v_web_id，
+    /// 服务端会认为设备身份前后不一致 → 推荐退化成游客流、评论返回空 body、
+    /// 点赞 status_code=0 但实际不生效。
+    /// 登录时抓到的是最新的，覆盖会话里的旧值。
+    /// </summary>
     [JsonIgnore]
     public string CookieHeader
     {
         get
         {
-            var parts = new List<string>();
-            if (!string.IsNullOrEmpty(Ttwid)) parts.Add("ttwid=" + Ttwid);
-            if (!string.IsNullOrEmpty(SvWebId)) parts.Add("s_v_web_id=" + SvWebId);
-            if (!string.IsNullOrEmpty(LoginCookies)) parts.Add(LoginCookies);
-            return string.Join("; ", parts);
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            if (!string.IsNullOrEmpty(Ttwid)) map["ttwid"] = Ttwid;
+            if (!string.IsNullOrEmpty(SvWebId)) map["s_v_web_id"] = SvWebId;
+
+            foreach (string part in LoginCookies.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string kv = part.Trim();
+                int eq = kv.IndexOf('=');
+                if (eq <= 0) continue;
+                map[kv[..eq]] = kv[(eq + 1)..];
+            }
+
+            return string.Join("; ", map.Select(kv => kv.Key + "=" + kv.Value));
         }
     }
 
