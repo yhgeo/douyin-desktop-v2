@@ -64,6 +64,9 @@
                                 <TextBlock x:Name="AccountHint" FontSize="11"
                                            Foreground="#5A5A66" Margin="0,5,0,0"
                                            Text="登录后可看到个性化推荐、完整评论" />
+                                <TextBlock x:Name="HealthText" FontSize="11"
+                                           Foreground="#5A5A66" Margin="0,4,0,0"
+                                           Text="登录状态：加载视频后自动检查" />
                             </StackPanel>
 
                             <StackPanel Grid.Column="1" Orientation="Horizontal"

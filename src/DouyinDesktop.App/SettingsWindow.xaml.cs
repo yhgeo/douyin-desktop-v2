@@ -42,7 +42,13 @@ public partial class SettingsWindow : Window
         ImageOnlyCheck.IsChecked = settings.ImageOnly;
         LoadDanmakuUi();
         RefreshAccount();
+
+        // 后台检查完登录状态后，设置页开着也能实时更新
+        LoginHealth.Changed += OnHealthChanged;
+        Closed += (_, _) => LoginHealth.Changed -= OnHealthChanged;
     }
+
+    private void OnHealthChanged() => Dispatcher.BeginInvoke(UpdateHealthText);
 
     // ================= 左侧导航 =================
 
@@ -168,6 +174,19 @@ public partial class SettingsWindow : Window
         }
     }
 
+    /// <summary>把 LoginHealth 的状态画到账号区块（过期用红色，正常用灰）。</summary>
+    private void UpdateHealthText()
+    {
+        if (HealthText is null) return;
+
+        HealthText.Text = $"登录状态：{LoginHealth.Describe()}（{LoginHealth.DescribeTime()}）";
+        HealthText.Foreground = LoginHealth.Current == LoginHealth.State.Expired
+            ? new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0xFE, 0x2C, 0x55))
+            : new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0x5A, 0x5A, 0x66));
+    }
+
     private void RefreshAccount()
     {
         bool logged = _client.Session?.IsLoggedIn == true;
@@ -181,6 +200,9 @@ public partial class SettingsWindow : Window
 
         LoginBtn.Content = logged ? "重新登录" : "扫码登录";
         LogoutBtn.Visibility = logged ? Visibility.Visible : Visibility.Collapsed;
+
+        // 登录健康度：靠"能不能读到评论"判断，主窗口每次加载视频后自动更新
+        UpdateHealthText();
 
         if (logged) _ = VerifyLoginAsync();
     }
