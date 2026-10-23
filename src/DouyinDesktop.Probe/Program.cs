@@ -125,6 +125,17 @@ if (args.Length > 0 && args[0] == "comments3")
     var f = await cd.GetFeedAsync(6);
     if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
 
+    string? tok3 = Environment.GetEnvironmentVariable("DY_MSTOKEN");
+    if (tok3 is not null)
+    {
+        await cd.EnsureSessionAsync();
+        if (cd.Session is not null)
+        {
+            cd.Session.MsToken = tok3 == "EMPTY" ? "" : tok3;
+            Console.WriteLine("MSTOKEN_LEN=" + cd.Session.MsToken.Length);
+        }
+    }
+
     for (int i = 0; i < Math.Min(4, f.Items.Count); i++)
     {
         string id = f.Items[i].Id;
@@ -151,11 +162,16 @@ if (args.Length > 0 && args[0] == "comments")
 
     // 加 token 参数就替换 msToken，用来验证"签名没问题、只是 token 不对"
     // DY_MSTOKEN=EMPTY 表示置空（刚登录时就是这个状态）
+    // 必须先 EnsureSessionAsync —— 否则 Session 还是 null，赋值会静默跳过
     string? envToken = Environment.GetEnvironmentVariable("DY_MSTOKEN");
-    if (envToken is not null && cd.Session is not null)
+    if (envToken is not null)
     {
-        cd.Session.MsToken = envToken == "EMPTY" ? "" : envToken;
-        Console.WriteLine($"（已替换 msToken，长度 {cd.Session.MsToken.Length}）");
+        await cd.EnsureSessionAsync();
+        if (cd.Session is not null)
+        {
+            cd.Session.MsToken = envToken == "EMPTY" ? "" : envToken;
+            Console.WriteLine($"（已替换 msToken，长度 {cd.Session.MsToken.Length}）");
+        }
     }
 
     // 加 guest 参数就清掉登录 Cookie，用来对比"游客 vs 登录"两种状态下评论接口的表现

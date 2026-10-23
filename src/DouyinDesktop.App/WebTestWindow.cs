@@ -136,6 +136,22 @@ public sealed class WebTestWindow : Window
                     if (browserAbogus[i] != ourAbogus[i]) { diffAt = i; break; }
                 }
                 AppLog.Write($"[自检] 首个不同位置：{diffAt}（长度相同时 -1 表示完全一致）");
+
+                // ===== 终极测试：浏览器 URL，只把 a_bogus 换成我们算的 =====
+                string oursUrl = "https://www.douyin.com/aweme/v1/web/comment/list/?" +
+                                 baseQuery + "&a_bogus=" + Uri.EscapeDataString(ourAbogus);
+
+                using var http2 = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                using var reqOurs = new HttpRequestMessage(HttpMethod.Get, oursUrl);
+                reqOurs.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
+                reqOurs.Headers.TryAddWithoutValidation("User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36");
+                reqOurs.Headers.TryAddWithoutValidation("Referer", "https://www.douyin.com/");
+                reqOurs.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
+
+                using var respOurs = await http2.SendAsync(reqOurs);
+                string bodyOurs = await respOurs.Content.ReadAsStringAsync();
+                AppLog.Write($"[自检] 换成我们的 a_bogus：HTTP {(int)respOurs.StatusCode}，长度 {bodyOurs.Length}");
             }
 
             Close();

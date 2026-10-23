@@ -679,29 +679,53 @@ public sealed class DouyinClient : IDisposable
     {
         var session = await EnsureSessionAsync(ct: ct);
 
+        // 参数**完整镜像浏览器**（顺序照抄抓包）。少一个都可能被判无效：
+        // 抓包里浏览器发约 40 个参数，我们之前只有 25 个。
+        string bv = _profile.BrowserVersion;
         var ps = new List<KeyValuePair<string, string>>
         {
             new("device_platform", "webapp"),
             new("aid", "6383"),
             new("channel", "channel_pc_web"),
             new("aweme_id", awemeId),
+            new("pc_img_format", "webp"),
             new("cursor", cursor.ToString()),
             new("count", count.ToString()),
             new("item_type", "0"),
-            // 这两个是空值字段，浏览器确实会发；签名输入里也不能少
             new("whale_cut_token", ""),
             new("cut_version", "1"),
             new("rcFT", ""),
+            new("update_version_code", "170400"),
+            new("pc_client_type", "1"),
+            new("pc_libra_divert", "Windows"),
+            new("support_h265", "0"),
+            new("support_dash", "1"),
+            new("cpu_core_num", _profile.CpuCores.ToString()),
+            new("version_code", "170400"),
+            new("version_name", "17.4.0"),
+            new("cookie_enabled", "true"),
+            new("screen_width", _profile.ScreenWidth.ToString()),
+            new("screen_height", _profile.ScreenHeight.ToString()),
+            new("browser_language", "zh-CN"),
+            new("browser_platform", "Win32"),
+            new("browser_name", "Chrome"),
+            new("browser_version", bv),
+            new("browser_online", "true"),
+            new("engine_name", "Blink"),
+            new("engine_version", bv),
+            new("os_name", "Windows"),
+            new("os_version", "10"),
+            new("device_memory", _profile.DeviceMemory.ToString()),
+            new("platform", "PC"),
+            new("downlink", "10"),
+            new("effective_type", "4g"),
+            new("round_trip_time", "0"),
+            new("webid", _profile.WebId),
+            new("uifid", session.EffectiveUifid),
+            new("verifyFp", session.EffectiveSvWebId),
+            new("fp", session.EffectiveSvWebId),
+            new("msToken", session.MsToken),
         };
-        ps.AddRange(_profile.PlatformParams());
-        ps.Add(new("webid", _profile.WebId));
-        ps.Add(new("uifid", session.EffectiveUifid));
-        // 参考实现（dy_apis/douyin_api.py 的 get_work_out_comment）里
-        // verifyFp / fp 在 msToken **之前**，也就是说它们参与 a_bogus 签名。
-        // 我们之前拼在 a_bogus 后面（不参与签名），服务端复算对不上 → 空 body。
-        ps.Add(new("verifyFp", session.EffectiveSvWebId));
-        ps.Add(new("fp", session.EffectiveSvWebId));
-        ps.Add(new("msToken", session.MsToken));
 
         string query = UrlCodec.ToQuery(ps);
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
@@ -709,10 +733,15 @@ public sealed class DouyinClient : IDisposable
                      $"&a_bogus={UrlCodec.Quote(abogus)}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        AddBrowserHeaders(req, session);
-        // 评论接口的 Referer 必须是作品页，首页 Referer 会被挡
-        req.Headers.Remove("Referer");
+
+        // 只发最小头集。实测（--webtest）：同样的 URL + 同样的 Cookie，
+        // 用「Cookie/UA/Referer/Accept」四个头 → 200 + 两万多字节评论；
+        // 用 AddBrowserHeaders 的全套头 → 空 body。
+        // 多发 sec-ch-ua / sec-fetch-* / priority 反而被挡。
+        req.Headers.TryAddWithoutValidation("Cookie", session.CookieHeader);
+        req.Headers.TryAddWithoutValidation("User-Agent", _profile.UserAgent);
         req.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/video/{awemeId}");
+        req.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
 
         try
         {
