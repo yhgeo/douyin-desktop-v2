@@ -676,70 +676,39 @@ public sealed class DouyinClient : IDisposable
     {
         var session = await EnsureSessionAsync(ct: ct);
 
-        // 参数**顺序**照抄抓包（网页版顺序）。签名是对这串原文算的，
-        // 顺序不同 → 服务端复算出来的串不同 → 直接返回空 body。
-        string bv = _profile.BrowserVersion;
         var ps = new List<KeyValuePair<string, string>>
         {
             new("device_platform", "webapp"),
             new("aid", "6383"),
             new("channel", "channel_pc_web"),
             new("aweme_id", awemeId),
-            new("pc_img_format", "webp"),
             new("cursor", cursor.ToString()),
             new("count", count.ToString()),
             new("item_type", "0"),
+            // 这两个是空值字段，浏览器确实会发；签名输入里也不能少
             new("whale_cut_token", ""),
             new("cut_version", "1"),
             new("rcFT", ""),
-            new("update_version_code", "170400"),
-            new("pc_client_type", "1"),
-            new("pc_libra_divert", "Windows"),
-            new("support_h265", "0"),
-            new("support_dash", "1"),
-            new("cpu_core_num", _profile.CpuCores.ToString()),
-            new("version_code", "170400"),
-            new("version_name", "17.4.0"),
-            new("cookie_enabled", "true"),
-            new("screen_width", _profile.ScreenWidth.ToString()),
-            new("screen_height", _profile.ScreenHeight.ToString()),
-            new("browser_language", "zh-CN"),
-            new("browser_platform", "Win32"),
-            new("browser_name", "Chrome"),
-            new("browser_version", bv),
-            new("browser_online", "true"),
-            new("engine_name", "Blink"),
-            new("engine_version", bv),
-            new("os_name", "Windows"),
-            new("os_version", "10"),
-            new("device_memory", _profile.DeviceMemory.ToString()),
-            new("platform", "PC"),
-            new("downlink", "10"),
-            new("effective_type", "4g"),
-            new("round_trip_time", "0"),
-            new("webid", _profile.WebId),
-            new("uifid", session.EffectiveUifid),
-            new("verifyFp", session.SvWebId),
-            new("fp", session.SvWebId),
-            new("msToken", session.MsToken),
         };
+        ps.AddRange(_profile.PlatformParams());
+        ps.Add(new("webid", _profile.WebId));
+        ps.Add(new("msToken", session.MsToken));
 
         string query = UrlCodec.ToQuery(ps);
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
 
-        // 评论接口**只带 a_bogus**，不要 timestamp / x-secsdk-web-signature。
-        // 抓包（19:20）确认浏览器真实请求就是 ...&msToken=...&a_bogus=...
-        // 之前误把评论加进 WebSign 白名单，多出两个参数 → 服务端直接返回空 body。
+        // 这一版是 10-22「评论功能刚做出来、能一直用」时的写法，原样保留：
+        // verifyFp/fp 在 a_bogus **之后**，不参与签名。
+        // 今天几次"优化"（改参数、改顺序、把 verifyFp 挪进签名）都让它失效了。
         string url = $"https://www.douyin.com/aweme/v1/web/comment/list/?{query}" +
-                     $"&a_bogus={UrlCodec.Quote(abogus)}";
+                     $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
-        Log?.Invoke("[评论URL] " + url);
-        // 抓包确认：网页版评论请求的 Referer 是**首页**，不是作品页。
-        // 之前改成作品页反而被挡（返回空 body）。
+        // 评论接口的 Referer 必须是作品页，首页 Referer 会被挡
         req.Headers.Remove("Referer");
-        req.Headers.TryAddWithoutValidation("Referer", "https://www.douyin.com/");
+        req.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/video/{awemeId}");
 
         try
         {

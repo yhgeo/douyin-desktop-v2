@@ -114,6 +114,14 @@ if (args.Length > 0 && args[0] == "comments")
     var item = f.Items[0];
     string targetId = args.Length > 1 ? args[1] : item.Id;
 
+    // 加 token 参数就替换 msToken，用来验证"签名没问题、只是 token 不对"
+    string? envToken = Environment.GetEnvironmentVariable("DY_MSTOKEN");
+    if (!string.IsNullOrEmpty(envToken) && cd.Session is not null)
+    {
+        cd.Session.MsToken = envToken;
+        Console.WriteLine($"（已替换 msToken，长度 {envToken.Length}）");
+    }
+
     // 加 guest 参数就清掉登录 Cookie，用来对比"游客 vs 登录"两种状态下评论接口的表现
     if (args.Contains("guest") && cd.Session is not null)
     {

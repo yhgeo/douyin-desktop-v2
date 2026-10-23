@@ -16,11 +16,13 @@ public sealed class DeviceProfile
     public int CpuCores { get; init; } = Math.Max(4, Environment.ProcessorCount);
     public int DeviceMemory { get; init; } = 32;
     /// <summary>
-    /// 设备指纹里的 webid。必须**跨启动稳定**：
-    /// 原来每次启动随机生成，等于每次都是一台新设备，
-    /// 服务端看到的身份一直变，推荐/评论这类接口容易被打回。
+    /// 设备指纹里的 webid。
+    ///
+    /// 10-22「评论能用」的版本就是每次启动随机生成，改回原样——
+    /// 之前改成持久化到文件（同一个值反复用）后评论/主页开始全空，
+    /// 怀疑这个值被服务端标记了。
     /// </summary>
-    public string WebId { get; init; } = LoadOrCreateWebId();
+    public string WebId { get; init; } = RandomDigits(19);
 
     private static string LoadOrCreateWebId()
     {

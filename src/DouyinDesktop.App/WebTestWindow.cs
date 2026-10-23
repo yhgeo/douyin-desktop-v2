@@ -112,8 +112,8 @@ public sealed class WebTestWindow : Window
                 // 对比两边的 msToken（浏览器 vs 我们保存的）
                 string browserToken = ExtractParam(capturedUrl, "msToken");
                 string ourToken = DouyinDesktop.Core.Api.DouyinSession.Load()?.MsToken ?? "";
-                AppLog.Write($"[自检] 浏览器 msToken 长度 {browserToken.Length}：{Head(browserToken)}");
-                AppLog.Write($"[自检] 我们的 msToken 长度 {ourToken.Length}：{Head(ourToken)}　相同={browserToken == ourToken}");
+                AppLog.Write($"[自检] 浏览器 msToken 长度 {browserToken.Length}：{browserToken}");
+                AppLog.Write($"[自检] 我们的 msToken 长度 {ourToken.Length}：{ourToken}　相同={browserToken == ourToken}");
             }
 
             Close();
