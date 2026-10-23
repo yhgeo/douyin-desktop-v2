@@ -16,13 +16,13 @@ public sealed class DeviceProfile
     public int CpuCores { get; init; } = Math.Max(4, Environment.ProcessorCount);
     public int DeviceMemory { get; init; } = 32;
     /// <summary>
-    /// 设备指纹里的 webid。
+    /// 设备指纹里的 webid。**必须跨启动稳定**。
     ///
-    /// 10-22「评论能用」的版本就是每次启动随机生成，改回原样——
-    /// 之前改成持久化到文件（同一个值反复用）后评论/主页开始全空，
-    /// 怀疑这个值被服务端标记了。
+    /// 现象证据：登录后能用，关掉程序再打开就全空——
+    /// 其它标识（ttwid / s_v_web_id / msToken / Cookie）都存在磁盘上不变，
+    /// 只有 webid 每次启动随机，等于重启后换了一台设备，服务端就不认了。
     /// </summary>
-    public string WebId { get; init; } = RandomDigits(19);
+    public string WebId { get; init; } = LoadOrCreateWebId();
 
     private static string LoadOrCreateWebId()
     {
@@ -45,6 +45,7 @@ public sealed class DeviceProfile
             return RandomDigits(19);
         }
     }
+
     public string InstallTime { get; init; } = "1715480185";
 
     /// <summary>
