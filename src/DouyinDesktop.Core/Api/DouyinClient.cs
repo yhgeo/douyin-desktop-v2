@@ -633,31 +633,53 @@ public sealed class DouyinClient : IDisposable
     {
         var session = await EnsureSessionAsync(ct: ct);
 
+        // 参数**顺序**照抄抓包（网页版顺序）。签名是对这串原文算的，
+        // 顺序不同 → 服务端复算出来的串不同 → 直接返回空 body。
+        string bv = _profile.BrowserVersion;
         var ps = new List<KeyValuePair<string, string>>
         {
             new("device_platform", "webapp"),
             new("aid", "6383"),
             new("channel", "channel_pc_web"),
             new("aweme_id", awemeId),
+            new("pc_img_format", "webp"),
             new("cursor", cursor.ToString()),
             new("count", count.ToString()),
             new("item_type", "0"),
-            // 下面这几个是抓包对比出来的：网页版评论请求都带，缺了会被静默拒绝
-            new("pc_img_format", "webp"),
+            new("whale_cut_token", ""),
+            new("cut_version", "1"),
+            new("rcFT", ""),
             new("update_version_code", "170400"),
+            new("pc_client_type", "1"),
             new("pc_libra_divert", "Windows"),
             new("support_h265", "0"),
             new("support_dash", "1"),
+            new("cpu_core_num", _profile.CpuCores.ToString()),
+            new("version_code", "170400"),
+            new("version_name", "17.4.0"),
+            new("cookie_enabled", "true"),
+            new("screen_width", _profile.ScreenWidth.ToString()),
+            new("screen_height", _profile.ScreenHeight.ToString()),
+            new("browser_language", "zh-CN"),
+            new("browser_platform", "Win32"),
+            new("browser_name", "Chrome"),
+            new("browser_version", bv),
+            new("browser_online", "true"),
+            new("engine_name", "Blink"),
+            new("engine_version", bv),
+            new("os_name", "Windows"),
+            new("os_version", "10"),
+            new("device_memory", _profile.DeviceMemory.ToString()),
+            new("platform", "PC"),
+            new("downlink", "10"),
+            new("effective_type", "4g"),
+            new("round_trip_time", "0"),
+            new("webid", _profile.WebId),
+            new("uifid", session.EffectiveUifid),
+            new("verifyFp", session.SvWebId),
+            new("fp", session.SvWebId),
+            new("msToken", session.MsToken),
         };
-        ps.AddRange(_profile.PlatformParams());
-        ps.Add(new("webid", _profile.WebId));
-        ps.Add(new("uifid", session.EffectiveUifid));
-        // verifyFp / fp 必须在 a_bogus **之前**参与签名。
-        // 原来是把它们拼在 a_bogus 后面，等于签的内容和发出去的不一致——
-        // 推荐流侥幸能过，评论这种校验严的端点直接返回空 body。
-        ps.Add(new("verifyFp", session.SvWebId));
-        ps.Add(new("fp", session.SvWebId));
-        ps.Add(new("msToken", session.MsToken));
 
         string query = UrlCodec.ToQuery(ps);
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
@@ -666,6 +688,7 @@ public sealed class DouyinClient : IDisposable
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
+        Log?.Invoke("[评论URL] " + url);
         // 抓包确认：网页版评论请求的 Referer 是**首页**，不是作品页。
         // 之前改成作品页反而被挡（返回空 body）。
         req.Headers.Remove("Referer");

@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text;
 
 namespace DouyinDesktop.Core.Api;
@@ -14,7 +15,34 @@ public sealed class DeviceProfile
     public int ScreenHeight { get; init; } = 1440;
     public int CpuCores { get; init; } = Math.Max(4, Environment.ProcessorCount);
     public int DeviceMemory { get; init; } = 32;
-    public string WebId { get; init; } = RandomDigits(19);
+    /// <summary>
+    /// 设备指纹里的 webid。必须**跨启动稳定**：
+    /// 原来每次启动随机生成，等于每次都是一台新设备，
+    /// 服务端看到的身份一直变，推荐/评论这类接口容易被打回。
+    /// </summary>
+    public string WebId { get; init; } = LoadOrCreateWebId();
+
+    private static string LoadOrCreateWebId()
+    {
+        try
+        {
+            string path = Path.Combine(DouyinPaths.DataDirectory, "webid.txt");
+            if (File.Exists(path))
+            {
+                string saved = File.ReadAllText(path).Trim();
+                if (saved.Length >= 15) return saved;
+            }
+
+            string id = RandomDigits(19);
+            Directory.CreateDirectory(DouyinPaths.DataDirectory);
+            File.WriteAllText(path, id);
+            return id;
+        }
+        catch
+        {
+            return RandomDigits(19);
+        }
+    }
     public string InstallTime { get; init; } = "1715480185";
 
     /// <summary>
