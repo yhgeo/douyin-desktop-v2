@@ -1641,7 +1641,7 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task CheckLoginHealthAsync()
     {
-        if (DateTime.Now - _lastHealthCheck < TimeSpan.FromMinutes(1)) return;
+        if (DateTime.Now - _lastHealthCheck < TimeSpan.FromSeconds(15)) return;
 
         var session = _client.Session;
         if (session?.IsLoggedIn != true)
@@ -1653,15 +1653,7 @@ public partial class MainWindow : Window
         string id = CurrentId;
         if (string.IsNullOrEmpty(id)) return;
 
-        // 没评论的作品不能用来判断登录态——空评论不等于登录过期。
-        // 之前没做这个判断，刷到一条零评论的视频就会误报"登录已过期"。
-        var current = _index >= 0 && _index < _items.Count ? _items[_index] : null;
-        if (current?.Statistics?.CommentCount is not > 0)
-        {
-            if (LoginHealth.Current == LoginHealth.State.Unknown)
-                LoginHealth.Set(LoginHealth.State.Ok);   // 至少能拉到视频，先当正常
-            return;
-        }
+        _lastHealthCheck = DateTime.Now;
 
         _lastHealthCheck = DateTime.Now;
 
@@ -1678,15 +1670,32 @@ public partial class MainWindow : Window
 
             if (page.Comments.Count > 0)
             {
+                _emptyStreak = 0;
+                AppLog.Write($"[登录检查] {id} 评论 {page.Comments.Count} 条 → 正常");
                 LoginHealth.Set(LoginHealth.State.Ok);
                 return;
             }
 
-            // 读不到 → 先试着从浏览器同步一次，成了再验一次
+            // 零评论的视频也会返回空，所以不能一次就判定过期：
+            // 连续两条都空才算（宁可晚一点提示，也别误报）。
+            _emptyStreak++;
+            AppLog.Write($"[登录检查] {id} 评论 0 条（连续 {_emptyStreak} 次）");
+
+            if (_emptyStreak < 2)
+            {
+                if (LoginHealth.Current == LoginHealth.State.Unknown)
+                    LoginHealth.Set(LoginHealth.State.Ok);
+                return;
+            }
+
+            // 判定过期前先试着从浏览器同步一次，成了就再验一次
             if (await TryRefreshFromBrowserAsync())
             {
                 page = await _client.GetCommentsAsync(id, 0, 5);
-                LoginHealth.Set(page.Comments.Count > 0 ? LoginHealth.State.Ok : LoginHealth.State.Expired);
+                bool ok = page.Comments.Count > 0;
+                AppLog.Write($"[登录检查] 同步后复查：{(ok ? "正常" : "仍然为空")}");
+                if (ok) _emptyStreak = 0;
+                LoginHealth.Set(ok ? LoginHealth.State.Ok : LoginHealth.State.Expired);
                 return;
             }
 
@@ -1697,6 +1706,9 @@ public partial class MainWindow : Window
             // 网络问题不算登录失效，保持原状态
         }
     }
+
+    /// <summary>连续读到空评论的次数（用于区分"零评论视频"和"登录失效"）。</summary>
+    private int _emptyStreak;
 
     // ================= 界面 =================
 
