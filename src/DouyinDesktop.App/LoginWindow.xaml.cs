@@ -54,6 +54,39 @@ public partial class LoginWindow : Window
             Web.CoreWebView2.Settings.IsStatusBarEnabled = false;
             Web.CoreWebView2.Settings.AreDevToolsEnabled = false;
 
+            // 顺手把浏览器真实使用的 webid 记下来。
+            //
+            // 抖音强校验接口（评论、作者作品）会核对 query 里的 webid，
+            // 我们自己随机生成的 19 位数字不被接受（实测：换掉它请求就返回空）。
+            // 登录窗口本来就会打开真实页面，从任意 /aweme/v1/web/ 请求里抄一个即可。
+            Web.CoreWebView2.AddWebResourceRequestedFilter("*aweme/v1/web/*",
+                CoreWebView2WebResourceContext.All);
+            Web.CoreWebView2.WebResourceRequested += (_, e) =>
+            {
+                try
+                {
+                    string u = e.Request.Uri;
+                    int i = u.IndexOf("webid=", StringComparison.Ordinal);
+                    if (i < 0) return;
+
+                    i += 6;
+                    int end = u.IndexOf('&', i);
+                    string webid = end < 0 ? u[i..] : u[i..end];
+                    if (webid.Length < 10) return;
+
+                    string path = Path.Combine(DouyinDesktop.Core.DouyinPaths.DataDirectory, "webid.txt");
+                    if (File.Exists(path) && File.ReadAllText(path).Trim() == webid) return;
+
+                    Directory.CreateDirectory(DouyinDesktop.Core.DouyinPaths.DataDirectory);
+                    File.WriteAllText(path, webid);
+                    AppLog.Write("已记录浏览器 webid：" + webid);
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Write("记录 webid 失败：" + ex.Message);
+                }
+            };
+
             // 浏览器进程挂了要能说清楚，否则界面只会莫名其妙停住
             Web.CoreWebView2.ProcessFailed += (_, args) =>
             {

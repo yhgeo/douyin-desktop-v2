@@ -137,6 +137,16 @@ public sealed class WebTestWindow : Window
                 }
                 AppLog.Write($"[自检] 首个不同位置：{diffAt}（长度相同时 -1 表示完全一致）");
 
+                // 把浏览器真实使用的 webid 记下来（强校验接口要核对它）
+                string browserWebId = ExtractParam(capturedUrl, "webid");
+                if (browserWebId.Length > 10)
+                {
+                    string wpath = Path.Combine(DouyinPaths.DataDirectory, "webid.txt");
+                    Directory.CreateDirectory(DouyinPaths.DataDirectory);
+                    File.WriteAllText(wpath, browserWebId);
+                    AppLog.Write($"[自检] 已把浏览器 webid 写入 {wpath}：{browserWebId}");
+                }
+
                 // ===== 终极测试：浏览器 URL，只把 a_bogus 换成我们算的 =====
                 string oursUrl = "https://www.douyin.com/aweme/v1/web/comment/list/?" +
                                  baseQuery + "&a_bogus=" + Uri.EscapeDataString(ourAbogus);
@@ -152,6 +162,43 @@ public sealed class WebTestWindow : Window
                 using var respOurs = await http2.SendAsync(reqOurs);
                 string bodyOurs = await respOurs.Content.ReadAsStringAsync();
                 AppLog.Write($"[自检] 换成我们的 a_bogus：HTTP {(int)respOurs.StatusCode}，长度 {bodyOurs.Length}");
+
+                // ===== 逐个替换参数值，定位是哪个值不被接受 =====
+                var session3 = DouyinDesktop.Core.Api.DouyinSession.Load();
+                string ourWebId = "";
+                try
+                {
+                    string p = Path.Combine(DouyinPaths.DataDirectory, "webid.txt");
+                    if (File.Exists(p)) ourWebId = File.ReadAllText(p).Trim();
+                }
+                catch { }
+
+                var probes = new (string Name, string Value)[]
+                {
+                    ("webid", ourWebId),
+                    ("uifid", session3?.EffectiveUifid ?? ""),
+                    ("msToken", session3?.MsToken ?? ""),
+                };
+
+                foreach (var (name, value) in probes)
+                {
+                    if (string.IsNullOrEmpty(value)) { AppLog.Write($"[自检] 替换 {name}：没有值，跳过"); continue; }
+
+                    string swapped = ReplaceParam(capturedUrl, name, value);
+                    string reSigned = ReSign(swapped);
+                    if (reSigned is null) { AppLog.Write($"[自检] 替换 {name}：重签失败"); continue; }
+
+                    using var rq = new HttpRequestMessage(HttpMethod.Get, reSigned);
+                    rq.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
+                    rq.Headers.TryAddWithoutValidation("User-Agent",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36");
+                    rq.Headers.TryAddWithoutValidation("Referer", "https://www.douyin.com/");
+                    rq.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
+
+                    using var rs = await http2.SendAsync(rq);
+                    string b = await rs.Content.ReadAsStringAsync();
+                    AppLog.Write($"[自检] 替换 {name}（长度 {value.Length}）：HTTP {(int)rs.StatusCode}，长度 {b.Length}");
+                }
             }
 
             Close();
@@ -173,4 +220,35 @@ public sealed class WebTestWindow : Window
 
     private static string Head(string s)
         => s.Length <= 24 ? s : s[..24] + "…";
+
+    /// <summary>把 URL 里某个参数的值换成新值（保留其余原样）。</summary>
+    private static string ReplaceParam(string url, string name, string value)
+    {
+        string marker = name + "=";
+        int i = url.IndexOf(marker, StringComparison.Ordinal);
+        if (i < 0) return url;
+
+        int start = i + marker.Length;
+        int end = url.IndexOf('&', start);
+        if (end < 0) end = url.Length;
+
+        return url[..start] + Uri.EscapeDataString(value) + url[end..];
+    }
+
+    /// <summary>把 URL 里旧的 a_bogus 去掉，按新 query 重算一个再拼上。</summary>
+    private static string? ReSign(string url)
+    {
+        int cut = url.IndexOf("&a_bogus=", StringComparison.Ordinal);
+        if (cut < 0) return null;
+
+        string head = url[..cut];
+        int q = head.IndexOf('?');
+        if (q < 0) return null;
+
+        string query = head[(q + 1)..];
+        var signer = new DouyinDesktop.Core.Signing.ABogus(false,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36");
+        string sign = signer.SignQuery(query, "", "www.douyin.com");
+        return head + "&a_bogus=" + Uri.EscapeDataString(sign);
+    }
 }
