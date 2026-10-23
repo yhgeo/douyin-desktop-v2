@@ -504,6 +504,20 @@ public partial class MainWindow : Window
                     return;
                 }
 
+                // 关注流拿到空内容 = 服务端没把我们当登录用户（设备身份和 Cookie 对不上）。
+                // 这种情况只有重新登录能恢复，所以要主动提示，不能让人以为"我没关注人"。
+                if (r.Items.Count == 0)
+                {
+                    _followEmptyStreak++;
+                    AppLog.Write($"[关注流] 空内容（连续 {_followEmptyStreak} 次）");
+                    if (_followEmptyStreak >= 2)
+                        LoginHealth.Set(LoginHealth.State.Expired);
+                }
+                else
+                {
+                    _followEmptyStreak = 0;
+                }
+
                 got = r.Items;
                 elapsed = r.ElapsedMs;
             }
@@ -1625,6 +1639,9 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(() => TimeText.Text = $"{Fmt(_mpv?.Position ?? 0)} / {Fmt(dur)}");
         _ = CheckLoginHealthAsync();
     }
+
+    /// <summary>关注流连续空内容的次数（用来判断"登录态没被服务端认"）。</summary>
+    private int _followEmptyStreak;
 
     private DateTime _lastHealthCheck = DateTime.MinValue;
     private bool _browserSyncTried;
