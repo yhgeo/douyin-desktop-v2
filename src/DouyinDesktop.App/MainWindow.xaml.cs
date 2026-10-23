@@ -136,6 +136,27 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task ReloginFreshAsync()
     {
+        // 先试着从浏览器同步：内置浏览器里可能还登录着，
+        // 能同步成功就**不用扫码**（扫码很麻烦，能不扫就不扫）。
+        _browserSyncTried = false;
+        SetStatus("正在尝试用浏览器里的登录状态恢复…");
+
+        if (await TryRefreshFromBrowserAsync())
+        {
+            string id = CurrentId;
+            if (!string.IsNullOrEmpty(id))
+            {
+                var page = await _client.GetCommentsAsync(id, 0, 3);
+                if (page.Comments.Count > 0)
+                {
+                    LoginHealth.Set(LoginHealth.State.Ok);
+                    SetStatus("已用浏览器里的登录状态恢复，无需重新扫码");
+                    return;
+                }
+            }
+        }
+
+        // 同步不回来才走扫码
         SetStatus("正在清理旧的登录状态…");
         ClearWebViewProfile();
 
@@ -1536,36 +1557,36 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 切换重入保护。
+    /// 切换节流用的时间戳。
     ///
     /// 播放失败时会「刷新地址重试 → 跳过下一条」，而 mpv 的 end-file 事件也是异步的，
-    /// 两个来源叠在一起会把 NextAsync 连续触发好几次，
-    /// 日志里能看到 1 秒内 loadfile 六七次——用户看到的就是"视频疯狂跳、然后全变成大众视频"。
+    /// 两个来源叠在一起会把 NextAsync 连续触发好几次
+    /// （日志里 1 秒内 loadfile 六七次 → 用户看到"视频疯狂跳、然后全变大众视频"）。
+    /// 这里用时间戳限速，不用布尔锁——布尔锁一旦卡住就再也切不了。
     /// </summary>
-    private bool _switching;
+    private DateTime _lastNextAt = DateTime.MinValue;
 
     private async Task NextAsync()
     {
-        if (_items.Count == 0 || _switching) return;
+        if (_items.Count == 0) return;
 
-        _switching = true;
-        try
-        {
-            if (_index + 1 < _items.Count)
-            {
-                await PlayIndexAsync(_index + 1);
-                return;
-            }
+        // 用时间戳节流，**不要用布尔锁**：
+        // 播放过程里可能有网络等待，一旦卡住布尔锁就永远释放不了，表现就是"切换不了"。
+        DateTime now = DateTime.Now;
+        if (now - _lastNextAt < TimeSpan.FromMilliseconds(250)) return;
+        _lastNextAt = now;
 
-            // 已经到缓冲区末尾：等下一批
-            SetStatus("正在加载更多…");
-            await LoadFeedAsync();
-        }
-        finally
+        if (_index + 1 < _items.Count)
         {
-            _switching = false;
+            await PlayIndexAsync(_index + 1);
+            return;
         }
+
+        // 已经到缓冲区末尾：等下一批
+        SetStatus("正在加载更多…");
+        await LoadFeedAsync();
     }
+
 
     private async Task PrevAsync()
     {
