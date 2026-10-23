@@ -811,7 +811,26 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            SetStatus("加载失败：" + ex.Message);
+            // "loading failed" 基本都是播放地址过期了（列表里放了一会儿的老条目）。
+            // 重新取一次详情换上新地址，再试一次——不行才报错。
+            AppLog.Write($"加载失败（{ex.Message}），尝试刷新播放地址：{item.Id}");
+            var fresh = await RefreshPlayUrlAsync(item);
+            if (fresh is not null)
+            {
+                try
+                {
+                    await _mpv.LoadAsync(_proxy.UrlFor(fresh));
+                    item = fresh;
+                }
+                catch (Exception ex2)
+                {
+                    SetStatus("加载失败：" + ex2.Message);
+                }
+            }
+            else
+            {
+                SetStatus("加载失败：" + ex.Message);
+            }
         }
 
         ResetDanmaku(item);
@@ -820,6 +839,81 @@ public partial class MainWindow : Window
         UpdateIndexLabel();
         EnsureBuffer();
         SaveSessionIfNeeded();
+    }
+
+    /// <summary>重新取一次详情换上新播放地址（老条目的地址会过期）。</summary>
+    private async Task<Aweme?> RefreshPlayUrlAsync(Aweme item)
+    {
+        try
+        {
+            var fresh = await _client.GetAwemeDetailAsync(item.Id);
+            if (fresh?.Video?.PlayAddr?.Uri is not { Length: > 0 }) return null;
+
+            int at = _items.FindIndex(x => x.Id == item.Id);
+            if (at >= 0) _items[at] = fresh;
+
+            AppLog.Write($"播放地址已刷新：{item.Id}");
+            return fresh;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("刷新播放地址失败：" + ex.Message);
+            return null;
+        }
+    }
+
+    // ================= 点赞 =================
+
+    /// <summary>本次运行里点过赞的作品（详情接口不保证每次都带 user_digged）。</summary>
+    private readonly HashSet<string> _liked = new();
+    private bool _likeBusy;
+
+    private void OnLikeClick(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        _ = ToggleLikeAsync();
+    }
+
+    private async Task ToggleLikeAsync()
+    {
+        if (_index < 0 || _index >= _items.Count) return;
+        if (_likeBusy) return;
+
+        var item = _items[_index];
+
+        if (_client.Session?.IsLoggedIn != true)
+        {
+            SetStatus("点赞需要先登录（Ctrl+O → 账号）");
+            return;
+        }
+
+        _likeBusy = true;
+        try
+        {
+            bool like = !_liked.Contains(item.Id);
+            if (await _client.DiggAsync(item.Id, like))
+            {
+                if (like) _liked.Add(item.Id); else _liked.Remove(item.Id);
+                UpdateLikeVisual(item);
+                SetStatus(like ? "已点赞" : "已取消点赞");
+            }
+            else
+            {
+                SetStatus("点赞失败（可能是登录态失效）");
+            }
+        }
+        finally { _likeBusy = false; }
+    }
+
+    private void UpdateLikeVisual(Aweme item)
+    {
+        bool liked = _liked.Contains(item.Id);
+        long n = item.Statistics?.DiggCount ?? 0;
+        if (liked) n++;     // 自己点的那一下算进去，数字才有反馈
+        LikeText.Text = $"{(liked ? "♥" : "♡")} {Count(n)}";
+        LikeText.Foreground = liked
+            ? new SolidColorBrush(Color.FromRgb(0xFE, 0x2C, 0x55))
+            : (Brush)FindResource("TextBrush");
     }
 
     /// <summary>
@@ -1457,7 +1551,9 @@ public partial class MainWindow : Window
         DescScroll.ScrollToTop();
 
         var st = item.Statistics;
-        LikeText.Text = $"♥ {Count(st?.DiggCount ?? 0)}";
+        // 详情接口带了 user_digged 就以此为准，没有就看本次运行里点过没
+        if (item.UserDigged == 1) _liked.Add(item.Id);
+        UpdateLikeVisual(item);
         CommentText.Text = $"💬 {Count(st?.CommentCount ?? 0)}";
         ShareText.Text = $"↗ {Count(st?.ShareCount ?? 0)}";
 
@@ -1690,6 +1786,10 @@ public partial class MainWindow : Window
                         SideTab.Comments => SideTab.Profile,
                         _ => SideTab.Detail,
                     });
+                    break;
+
+                case "like":
+                    await ToggleLikeAsync();
                     break;
 
                 case "login":

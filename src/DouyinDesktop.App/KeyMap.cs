@@ -24,6 +24,7 @@ public sealed class KeyMap
         new("mute",       "静音",         Key.M,      Array.Empty<Key>(), true),
         new("fullscreen", "全屏",         Key.F,      Array.Empty<Key>(), true),
         new("tab",        "详情 / 评论 / 主页", Key.Tab, Array.Empty<Key>()),
+        new("like",       "点赞 / 取消",  Key.X,      Array.Empty<Key>()),
         new("follow",     "关注页 / 推荐页", Key.G,   Array.Empty<Key>()),
 
         // 下面三个**默认不绑键**：都不是高频操作，绑着反而容易误触。

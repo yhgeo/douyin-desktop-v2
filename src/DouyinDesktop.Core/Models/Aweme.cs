@@ -24,6 +24,9 @@ public sealed class Aweme
     /// <summary>图集作品没有可播放的视频流，走另一套展示逻辑。</summary>
     [JsonIgnore] public bool IsImagePost => Images is { Count: > 0 };
 
+    /// <summary>当前登录用户是否点过赞（1 = 点过）。游客态是 0。</summary>
+    [JsonPropertyName("user_digged")] public int UserDigged { get; init; }
+
     /// <summary>能不能播：有 uri 才算。</summary>
     [JsonIgnore] public bool IsPlayable => !string.IsNullOrEmpty(Video?.PlayAddr?.Uri);
 
@@ -68,8 +71,7 @@ public sealed class Author
 
 public sealed class Statistics
 {
-    [JsonPropertyName("digg_count")] public long DiggCount { get; init; }
-    [JsonPropertyName("comment_count")] public long CommentCount { get; init; }
+    [JsonPropertyName("digg_count")] public long DiggCount { get; init; }    [JsonPropertyName("comment_count")] public long CommentCount { get; init; }
     [JsonPropertyName("share_count")] public long ShareCount { get; init; }
     [JsonPropertyName("collect_count")] public long CollectCount { get; init; }
     [JsonPropertyName("play_count")] public long PlayCount { get; init; }

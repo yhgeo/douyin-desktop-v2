@@ -533,6 +533,61 @@ public sealed class DouyinClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// 点赞 / 取消点赞。type=1 点赞，0 取消。必须登录。
+    /// 路径 /aweme/v1/web/commit/item/digg/ 是网页版真实请求。
+    /// </summary>
+    public async Task<bool> DiggAsync(string awemeId, bool like, CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("aweme_id", awemeId),
+            new("item_type", "0"),
+            new("type", like ? "1" : "0"),
+        };
+        ps.AddRange(_profile.PlatformParams());
+        ps.Add(new("webid", _profile.WebId));
+        ps.Add(new("msToken", session.MsToken));
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+        string url = $"https://www.douyin.com/aweme/v1/web/commit/item/digg/?{query}" +
+                     $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                     $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, url);
+        req.Content = new StringContent("", System.Text.Encoding.UTF8, "application/x-www-form-urlencoded");
+        AddBrowserHeaders(req, session);
+        req.Headers.Remove("Referer");
+        req.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/video/{awemeId}");
+
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                Log?.Invoke($"点赞 HTTP {(int)resp.StatusCode}");
+                return false;
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            int code = doc.RootElement.TryGetProperty("status_code", out var sc) ? sc.GetInt32() : -1;
+            Log?.Invoke($"点赞 {(like ? "赞" : "取消")} status_code={code}");
+            return code == 0;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
+        {
+            Log?.Invoke("点赞失败：" + ex.Message);
+            return false;
+        }
+    }
+
     public async Task<CommentPage> GetCommentsAsync(
         string awemeId, long cursor = 0, int count = 20, CancellationToken ct = default)
     {

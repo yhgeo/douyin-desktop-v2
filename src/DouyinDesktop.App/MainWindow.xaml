@@ -145,7 +145,9 @@
                             </ScrollViewer>
 
                             <StackPanel x:Name="StatsPanel" Orientation="Horizontal" Margin="0,0,0,18">
-                                <TextBlock x:Name="LikeText" Style="{StaticResource Stat}" />
+                                <TextBlock x:Name="LikeText" Style="{StaticResource Stat}"
+                                           Cursor="Hand" ToolTip="点赞 / 取消（快捷键 X）"
+                                           MouseLeftButtonUp="OnLikeClick" />
                                 <TextBlock x:Name="CommentText" Style="{StaticResource Stat}" />
                                 <TextBlock x:Name="ShareText" Style="{StaticResource Stat}" />
                             </StackPanel>
