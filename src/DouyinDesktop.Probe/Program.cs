@@ -85,6 +85,22 @@ if (args.Length > 0 && args[0] == "session")
     return same == Math.Min(5, loaded.Items.Count) ? 0 : 1;
 }
 
+// 详情接口自检：看返回里有没有 user_digged（点赞回读校验要用）
+if (args.Length > 0 && args[0] == "detail")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var cd = DouyinClient.Create();
+    cd.Log += m => Console.WriteLine("    " + m);
+
+    var f = await cd.GetFeedAsync(5);
+    if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
+
+    string id = args.Length > 1 ? args[1] : f.Items[0].Id;
+    var item = await cd.GetAwemeDetailAsync(id);
+    Console.WriteLine(item is null ? "详情为空" : $"详情 ok：{item.Desc[..Math.Min(20, item.Desc.Length)]}");
+    return 0;
+}
+
 // dtrait blob 自检：打印 C# 算出来的设备特征 blob，用来和参考实现比对
 if (args.Length > 0 && args[0] == "blob")
 {

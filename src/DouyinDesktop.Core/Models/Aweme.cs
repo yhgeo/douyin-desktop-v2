@@ -24,8 +24,12 @@ public sealed class Aweme
     /// <summary>图集作品没有可播放的视频流，走另一套展示逻辑。</summary>
     [JsonIgnore] public bool IsImagePost => Images is { Count: > 0 };
 
-    /// <summary>当前登录用户是否点过赞（1 = 点过）。游客态是 0。</summary>
-    [JsonPropertyName("user_digged")] public int UserDigged { get; init; }
+    /// <summary>
+    /// 当前登录用户是否点过赞（1 = 点过）。
+    /// 用可空类型：很多接口根本不返回这个字段，null 表示"不知道"，
+    /// 不能当成"没点过"——否则会误报"点赞没有生效"。
+    /// </summary>
+    [JsonPropertyName("user_digged")] public int? UserDigged { get; init; }
 
     /// <summary>能不能播：有 uri 才算。</summary>
     [JsonIgnore] public bool IsPlayable => !string.IsNullOrEmpty(Video?.PlayAddr?.Uri);

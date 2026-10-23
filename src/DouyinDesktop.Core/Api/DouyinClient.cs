@@ -1046,11 +1046,13 @@ public sealed class DouyinClient : IDisposable
             if (!doc.RootElement.TryGetProperty("aweme_detail", out var d)
                 || d.ValueKind != JsonValueKind.Object)
             {
-                Log?.Invoke("详情里没有 aweme_detail");
-                return null;
+                Log?.Invoke("详情里没有 aweme_detail");                return null;
             }
 
             var item = d.Deserialize<Aweme>(JsonOptions);
+            Log?.Invoke(d.TryGetProperty("user_digged", out var ud)
+                ? $"详情 ok，user_digged={ud}"
+                : "详情 ok，但没有 user_digged 字段");
             return item;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)

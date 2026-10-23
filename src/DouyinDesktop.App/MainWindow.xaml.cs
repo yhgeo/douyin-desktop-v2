@@ -949,12 +949,13 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // status_code=0 不等于真的生效（风控会静默丢弃）。
-            // 回读一次详情，看 user_digged 有没有跟着变。
+            // status_code=0 不等于真的生效，所以尽量回读一次详情看 user_digged。
+            // 但详情接口经常拿不到（风控）或者不带这个字段 —— 那就**不要下结论**，
+            // 之前一律当成失败，导致明明点上了也显示"没有生效"。
             var check = await _client.GetAwemeDetailAsync(item.Id);
-            bool? actual = check is null ? null : check.UserDigged == 1;
+            int? actual = check?.UserDigged;
 
-            if (actual is not null && actual != like)
+            if (actual is not null && (actual == 1) != like)
             {
                 SetStatus(like ? "点赞没有生效（可能被风控）" : "取消点赞没有生效");
                 return;
@@ -1628,7 +1629,7 @@ public partial class MainWindow : Window
 
         var st = item.Statistics;
         // 详情接口带了 user_digged 就以此为准，没有就看本次运行里点过没
-        if (item.UserDigged == 1) _liked.Add(item.Id);
+        if (item.UserDigged == 1) _liked.Add(item.Id);   // null 表示接口没给，按未点赞处理
         UpdateLikeVisual(item);
         CommentText.Text = $"💬 {Count(st?.CommentCount ?? 0)}";
         ShareText.Text = $"↗ {Count(st?.ShareCount ?? 0)}";
