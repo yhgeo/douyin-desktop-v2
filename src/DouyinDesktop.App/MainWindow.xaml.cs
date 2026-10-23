@@ -1120,6 +1120,14 @@ public partial class MainWindow : Window
         string id = CurrentId;
         if (string.IsNullOrEmpty(id) || _commentsLoading) return;
 
+        // 刚被限流过：直接告诉用户稍后再试，别继续撞接口
+        if (reset && DateTime.Now < _commentCooldownUntil)
+        {
+            CommentEmpty.Text = "评论暂时取不到（请求太频繁），稍等一会儿再切回来";
+            CommentEmpty.Visibility = Visibility.Visible;
+            return;
+        }
+
         if (reset || id != _commentAwemeId)
         {
             _commentAwemeId = id;
@@ -1144,7 +1152,9 @@ public partial class MainWindow : Window
 
             if (_commentVms.Count == 0)
             {
-                CommentEmpty.Text = page.Total == 0 ? "暂无评论" : "评论加载失败（可能被风控）";
+                // 空响应先按"限流"处理：冷却一段时间，别马上重试
+                if (reset) _commentCooldownUntil = DateTime.Now.AddSeconds(90);
+                CommentEmpty.Text = page.Total == 0 ? "暂无评论" : "评论暂时取不到（请求太频繁），稍后再试";
                 CommentEmpty.Visibility = Visibility.Visible;
             }
         }
@@ -1602,6 +1612,14 @@ public partial class MainWindow : Window
     private bool _browserSyncTried;
 
     /// <summary>
+    /// 评论接口的冷却期。
+    ///
+    /// 抖音对评论请求限流很紧：连续几次就返回空 body（实测 14 秒内就被挡）。
+    /// 空响应不能当成"登录过期"，也不该马上重试——越试挡得越久。
+    /// </summary>
+    private DateTime _commentCooldownUntil = DateTime.MinValue;
+
+    /// <summary>
     /// 从内置浏览器同步一次登录凭据（浏览器那份会自己续期）。
     /// 每次运行最多试一次，避免反复起浏览器内核。
     /// </summary>
@@ -1644,7 +1662,15 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task CheckLoginHealthAsync()
     {
-        if (DateTime.Now - _lastHealthCheck < TimeSpan.FromSeconds(15)) return;
+        // 只在"还不知道状态"或"已经判定过期"时才查。
+        // 状态正常就不查了——评论接口被频繁调用会被抖音短时限流，
+        // 表现就是"刚登录能看，刷几条之后全空"，很容易被误判成登录过期。
+        if (LoginHealth.Current == LoginHealth.State.Ok) return;
+        if (DateTime.Now < _commentCooldownUntil) return;   // 刚被限流过，别再撞
+
+        // 正常状态 30 分钟才查一次；已经出现过一次空，就 20 秒后复查确认
+        TimeSpan gap = _emptyStreak > 0 ? TimeSpan.FromSeconds(20) : TimeSpan.FromMinutes(30);
+        if (DateTime.Now - _lastHealthCheck < gap) return;
 
         var session = _client.Session;
         if (session?.IsLoggedIn != true)
