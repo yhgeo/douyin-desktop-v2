@@ -21,6 +21,9 @@ public sealed class MpvIpc : IAsyncDisposable
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement?>> _pending = new();
     private readonly Task _readLoop;
 
+    /// <summary>串行化写管道：StreamWriter 不允许并发写。</summary>
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
+
     private int _nextId;
 
     /// <summary>属性变化（observe_property 订阅的那些）。</summary>
@@ -71,7 +74,19 @@ public sealed class MpvIpc : IAsyncDisposable
         string json = JsonSerializer.Serialize(new { command = args, request_id = id });
         try
         {
-            await _writer.WriteLineAsync(json);
+            // StreamWriter 不支持并发写：切视频时 loadfile / pause / sub-add 会同时发，
+            // 后一条会撞上前一条没写完的流，抛
+            // "The stream is currently in use by a previous operation on the stream."
+            await _writeGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await _writer.WriteLineAsync(json).ConfigureAwait(false);
+                await _writer.FlushAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                _writeGate.Release();
+            }
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
