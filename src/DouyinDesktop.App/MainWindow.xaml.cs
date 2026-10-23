@@ -1887,6 +1887,14 @@ public partial class MainWindow : Window
 
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)
     {
+        // 滚轮一格一格地滚会连续触发，节流和键盘共用同一个时间窗，
+        // 否则滚一下能跳好几条，上一条还没起播就被顶掉了。
+        if (SwitchThrottled())
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (e.Delta < 0) _ = NextAsync();
         else if (e.Delta > 0) _ = PrevAsync();
         e.Handled = true;
