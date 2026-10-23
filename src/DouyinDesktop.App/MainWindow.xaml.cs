@@ -888,6 +888,32 @@ public partial class MainWindow : Window
         return false;
     }
 
+    /// <summary>
+    /// 用默认浏览器打开当前作品的网页版。
+    ///
+    /// 抖音收紧了接口签名后，评论、作者作品、点赞在客户端里都拿不到/发不出去，
+    /// 这条路 0 开销、0 维护——需要评论或点赞时按 B 切过去看。
+    /// </summary>
+    private void OpenInBrowser()
+    {
+        if (_index < 0 || _index >= _items.Count)
+        {
+            SetStatus("还没有在播的作品");
+            return;
+        }
+
+        string url = $"https://www.douyin.com/video/{_items[_index].Id}";
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            SetStatus("已在浏览器中打开");
+        }
+        catch (Exception ex)
+        {
+            SetStatus("打开浏览器失败：" + ex.Message);
+        }
+    }
+
     // ================= 点赞 =================
 
     /// <summary>本次运行里点过赞的作品（详情接口不保证每次都带 user_digged）。</summary>
@@ -1838,6 +1864,10 @@ public partial class MainWindow : Window
                         SideTab.Comments => SideTab.Profile,
                         _ => SideTab.Detail,
                     });
+                    break;
+
+                case "openweb":
+                    OpenInBrowser();
                     break;
 
                 case "like":
