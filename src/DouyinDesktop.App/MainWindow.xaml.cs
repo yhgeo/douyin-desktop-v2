@@ -2075,8 +2075,36 @@ public partial class MainWindow : Window
         if (session is null) return;
 
         session.LoginCookies = "";
+        session.Uifid = "";
         session.Save();
+
+        // 登录窗口用的是持久化的 WebView2 用户目录，不清掉的话
+        // 下次点"扫码登录"页面还是登录状态 → 窗口一闪就自动关掉，根本没机会扫码。
+        ClearWebViewProfile();
         SetStatus("已退出登录");
+    }
+
+    /// <summary>清掉内置浏览器的登录状态（退出登录时用）。</summary>
+    private static void ClearWebViewProfile()
+    {
+        try
+        {
+            string dir = DouyinDesktop.Core.DouyinPaths.WebViewDirectory;
+            if (!Directory.Exists(dir)) return;
+
+            // Cookie / 缓存都在这些子目录里；被占用时删不掉，忽略即可
+            foreach (string sub in new[] { "EBWebView", "Default" })
+            {
+                string path = Path.Combine(dir, sub);
+                if (!Directory.Exists(path)) continue;
+                try { Directory.Delete(path, recursive: true); }
+                catch (Exception ex) { AppLog.Write($"清理浏览器数据失败（{sub}）：{ex.Message}"); }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("清理浏览器数据失败：" + ex.Message);
+        }
     }
 
     private void OnWindowStateChanged(object? sender, EventArgs e)

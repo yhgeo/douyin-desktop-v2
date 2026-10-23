@@ -96,8 +96,19 @@ public sealed class DouyinClient : IDisposable
             }
 
             var sw = Stopwatch.StartNew();
+            var previous = _session ?? DouyinSession.Load();
             _session = await DouyinSession.CreateAsync(_http, _profile, ct);
             sw.Stop();
+
+            // 刷新凭据只该换 ttwid / msToken 这些游客材料，
+            // **不能把登录态弄丢**——之前这里直接新建会话，
+            // 于是推荐流失败一次重试就变成游客流（"刷一会儿就不个性化了"）。
+            if (previous is { IsLoggedIn: true })
+            {
+                _session.LoginCookies = previous.LoginCookies;
+                _session.Uifid = previous.Uifid;
+            }
+
             _session.Save();
             Log?.Invoke(_session.IsComplete
                 ? $"凭据已注册（{sw.ElapsedMilliseconds}ms）"
