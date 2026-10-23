@@ -726,10 +726,12 @@ public sealed class DouyinClient : IDisposable
 
         string query = UrlCodec.ToQuery(ps);
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
-        string fullQuery = $"{query}&a_bogus={UrlCodec.Quote(abogus)}";
-        // 评论也走 webSign（抓包确认网页版带 x-secsdk-web-signature）
-        string url = WebSign.SignUrl(
-            "https://www.douyin.com/aweme/v1/web/comment/list/", fullQuery, session.EffectiveUifid);
+
+        // 评论接口**只带 a_bogus**，不要 timestamp / x-secsdk-web-signature。
+        // 抓包（19:20）确认浏览器真实请求就是 ...&msToken=...&a_bogus=...
+        // 之前误把评论加进 WebSign 白名单，多出两个参数 → 服务端直接返回空 body。
+        string url = $"https://www.douyin.com/aweme/v1/web/comment/list/?{query}" +
+                     $"&a_bogus={UrlCodec.Quote(abogus)}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
@@ -751,6 +753,18 @@ public sealed class DouyinClient : IDisposable
             }
 
             var page = ParseComments(body, cursor, count);
+
+            // 空 body 时把状态码和关键响应头打出来——服务端拒绝的原因通常在这里
+            if (page.Comments.Count == 0)
+            {
+                var hs = resp.Headers
+                    .Where(h => h.Key.StartsWith("x-tt", StringComparison.OrdinalIgnoreCase)
+                             || h.Key.StartsWith("x-ms", StringComparison.OrdinalIgnoreCase)
+                             || h.Key.Contains("ratelimit", StringComparison.OrdinalIgnoreCase)
+                             || h.Key.Equals("content-length", StringComparison.OrdinalIgnoreCase))
+                    .Select(h => $"{h.Key}={string.Join(",", h.Value)}");
+                Log?.Invoke($"评论空响应 HTTP {(int)resp.StatusCode}，长度 {body.Length}，头：{string.Join(" | ", hs)}");
+            }
 
             // 登录着却拿到空 → 多半是登录态过期了，让界面明确提示
             if (page.Comments.Count == 0) ReportLoginExpired();

@@ -101,20 +101,6 @@ if (args.Length > 0 && args[0] == "detail")
     return 0;
 }
 
-// dtrait blob 自检：打印 C# 算出来的设备特征 blob，用来和参考实现比对
-if (args.Length > 0 && args[0] == "blob")
-{
-    Console.OutputEncoding = System.Text.Encoding.UTF8;
-    string ua = args.Length > 1
-        ? args[1]
-        : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36";
-    string blob = DouyinDesktop.Core.Signing.DTrait.BuildBlob(ua, 2560, 1440, 20, 32);
-    Console.WriteLine("BLOB=" + blob);
-    Console.WriteLine("HEADER=" + DouyinDesktop.Core.Signing.DTrait.BuildHeader(
-        "/aweme/v1/web/comment/list/", ua, 2560, 1440, 20, 32));
-    return 0;
-}
-
 // 评论接口验证：登录态下是否还返回 0 条
 if (args.Length > 0 && args[0] == "comments")
 {

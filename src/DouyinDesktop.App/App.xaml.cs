@@ -20,6 +20,8 @@ public partial class App : Application
         // （StartupUri 已在 App.xaml 里去掉，否则会两个窗口一起开）
         Window win = e.Args.Contains("--diagnose")
             ? new DiagnoseWindow()
+            : e.Args.FirstOrDefault(a => a.StartsWith("--webtest=", StringComparison.Ordinal)) is { } wt
+                ? new WebTestWindow(wt["--webtest=".Length..])
             : e.Args.Contains("--settings")
                 ? new SettingsWindow(KeyMap.Load(), AppSettings.Load(),
                     DouyinDesktop.Core.Api.DouyinClient.Create(),
