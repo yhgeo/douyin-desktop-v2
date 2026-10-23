@@ -1037,6 +1037,26 @@ public sealed class DouyinClient : IDisposable
         string url = WebSign.SignUrl(
             "https://www.douyin.com/aweme/v1/web/aweme/post/", query, uifid);
 
+        // 优先用模板（浏览器真实 URL），只替换作者和分页参数再重签
+        const string PostPath = "/aweme/v1/web/aweme/post/";
+        string? postTpl = GetTemplate?.Invoke(PostPath);
+        if (postTpl is null && CaptureTemplate is not null)
+        {
+            Log?.Invoke("首次使用，正在抓取主页模板…");
+            if (await CaptureTemplate(secUid)) postTpl = GetTemplate?.Invoke(PostPath);
+        }
+
+        if (postTpl is not null)
+        {
+            string? fromTpl = BuildFromTemplate(postTpl, "", 0, 0, session,
+                "sec_user_id", secUid);
+            if (fromTpl is not null)
+            {
+                url = fromTpl;
+                Log?.Invoke("作者作品使用模板 URL");
+            }
+        }
+
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
         req.Headers.Remove("Referer");

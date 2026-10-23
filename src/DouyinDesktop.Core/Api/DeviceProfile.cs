@@ -16,19 +16,20 @@ public sealed class DeviceProfile
     public int CpuCores { get; init; } = Math.Max(4, Environment.ProcessorCount);
     public int DeviceMemory { get; init; } = 32;
     /// <summary>
-    /// 设备指纹里的 webid。**必须跨启动稳定**。
+    /// 设备指纹里的 webid（推荐流用）。
     ///
-    /// 现象证据：登录后能用，关掉程序再打开就全空——
-    /// 其它标识（ttwid / s_v_web_id / msToken / Cookie）都存在磁盘上不变，
-    /// 只有 webid 每次启动随机，等于重启后换了一台设备，服务端就不认了。
+    /// 用**本机独立的稳定值**，和「浏览器真实 webid」分开：
+    /// - 强校验接口（评论/作者作品）必须用浏览器那个 webid（走模板）
+    /// - 推荐流的个性化是按这个 webid 在服务端积累的，换一次就冷启动
+    /// 所以两个值各存各的：webid-app.txt（本文件）/ webid.txt（浏览器）。
     /// </summary>
-    public string WebId { get; init; } = LoadOrCreateWebId();
+    public string WebId { get; init; } = LoadOrCreateAppWebId();
 
-    private static string LoadOrCreateWebId()
+    private static string LoadOrCreateAppWebId()
     {
         try
         {
-            string path = Path.Combine(DouyinPaths.DataDirectory, "webid.txt");
+            string path = Path.Combine(DouyinPaths.DataDirectory, "webid-app.txt");
             if (File.Exists(path))
             {
                 string saved = File.ReadAllText(path).Trim();
