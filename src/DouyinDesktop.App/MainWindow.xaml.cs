@@ -1195,11 +1195,18 @@ public partial class MainWindow : Window
 
         ProfileName.Text = "@" + author.Nickname;
 
+        AppLog.Write($"[主页] 请求 {author.Nickname} / {author.SecUid}（当前已显示 {_profileSecUid}）");
+
         // 同一个作者不重复拉
-        if (_profileSecUid == author.SecUid && ProfileList.ItemsSource is not null) return;
+        if (_profileSecUid == author.SecUid && ProfileList.ItemsSource is not null)
+        {
+            AppLog.Write("[主页] 同作者，跳过");
+            return;
+        }
 
         if (_profileCache.TryGetValue(author.SecUid, out var cached))
         {
+            AppLog.Write($"[主页] 命中缓存 {cached.Count} 条");
             ShowProfile(author, cached);
             return;
         }
@@ -1209,6 +1216,7 @@ public partial class MainWindow : Window
         if (!result.Success)
         {
             ProfileCount.Text = "";
+            AppLog.Write("[主页] 失败：" + result.Message);
             SetStatus("主页加载失败：" + result.Message);
             return;
         }
@@ -1715,6 +1723,21 @@ public partial class MainWindow : Window
                 if (LoginHealth.Current == LoginHealth.State.Unknown)
                     LoginHealth.Set(LoginHealth.State.Ok);
                 return;
+            }
+
+            // 评论空 ≠ 登录失效：评论接口会被单独限流（日志里见过：
+            // 同一时刻作者作品能拉 23 条、评论却是 0 条）。
+            // 用"作者作品"交叉验证一下，能拉到就说明登录没问题。
+            string? secUid = _index >= 0 && _index < _items.Count ? _items[_index].Author?.SecUid : null;
+            if (!string.IsNullOrEmpty(secUid))
+            {
+                var posts = await _client.GetUserPostsAsync(secUid);
+                if (posts.Success && posts.Items.Count > 0)
+                {
+                    AppLog.Write($"[登录检查] 作品能拉到 {posts.Items.Count} 条 → 登录正常，评论属于限流");
+                    LoginHealth.Set(LoginHealth.State.Ok);
+                    return;
+                }
             }
 
             // 先亮提示，再去后台尝试救回来——不要等浏览器起完才让用户看到
@@ -2300,6 +2323,9 @@ public partial class MainWindow : Window
 
         _client.ResetLoginExpiredFlag();
         _browserSyncTried = false;                    // 新凭据，允许以后再同步一次
+        _emptyStreak = 0;                             // 空计数必须清零，否则一登录就被判过期
+        _commentCooldownUntil = DateTime.MinValue;    // 限流冷却也清掉
+        _lastHealthCheck = DateTime.MinValue;
         LoginHealth.Set(LoginHealth.State.Unknown);   // 等下次加载视频时重新检查
         SetStatus("登录成功，正在刷新推荐…");
         await LoadFeedAsync(reset: true);
