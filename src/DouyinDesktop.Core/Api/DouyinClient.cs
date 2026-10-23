@@ -593,8 +593,7 @@ public sealed class DouyinClient : IDisposable
                      $"&a_bogus={UrlCodec.Quote(abogus)}" +
                      $"&verifyFp={session.SvWebId}&fp={session.SvWebId}";
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, url);
-        req.Content = new StringContent("", System.Text.Encoding.UTF8, "application/x-www-form-urlencoded");
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
         req.Headers.Remove("Referer");
         req.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/video/{awemeId}");
