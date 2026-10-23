@@ -695,17 +695,18 @@ public sealed class DouyinClient : IDisposable
         };
         ps.AddRange(_profile.PlatformParams());
         ps.Add(new("webid", _profile.WebId));
+        ps.Add(new("uifid", session.EffectiveUifid));
+        // 参考实现（dy_apis/douyin_api.py 的 get_work_out_comment）里
+        // verifyFp / fp 在 msToken **之前**，也就是说它们参与 a_bogus 签名。
+        // 我们之前拼在 a_bogus 后面（不参与签名），服务端复算对不上 → 空 body。
+        ps.Add(new("verifyFp", session.EffectiveSvWebId));
+        ps.Add(new("fp", session.EffectiveSvWebId));
         ps.Add(new("msToken", session.MsToken));
 
         string query = UrlCodec.ToQuery(ps);
         string abogus = _signer.SignQuery(query, "", "www.douyin.com");
-
-        // 这一版是 10-22「评论功能刚做出来、能一直用」时的写法，原样保留：
-        // verifyFp/fp 在 a_bogus **之后**，不参与签名。
-        // 今天几次"优化"（改参数、改顺序、把 verifyFp 挪进签名）都让它失效了。
         string url = $"https://www.douyin.com/aweme/v1/web/comment/list/?{query}" +
-                     $"&a_bogus={UrlCodec.Quote(abogus)}" +
-                     $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
+                     $"&a_bogus={UrlCodec.Quote(abogus)}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);

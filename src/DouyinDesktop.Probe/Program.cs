@@ -101,6 +101,20 @@ if (args.Length > 0 && args[0] == "detail")
     return 0;
 }
 
+// 签名对齐测试：用固定时间/固定随机数算，和参考实现逐字节比对
+if (args.Length > 0 && args[0] == "sign")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    string q = args.Length > 1
+        ? args[1]
+        : "device_platform=webapp&aid=6383&channel=channel_pc_web&aweme_id=7698704627360943375&cursor=0&count=5&item_type=0&whale_cut_token=&cut_version=1&rcFT=";
+
+    var s = new DouyinDesktop.Core.Signing.ABogus(true, fixedNowMs: 1720000000000L, fixedCounter: 2);
+    Console.WriteLine("QUERY=" + q);
+    Console.WriteLine("ABOGUS=" + s.SignQuery(q, "", "www.douyin.com"));
+    return 0;
+}
+
 // 连续多次评论请求：看第几次开始失败，并打印每次的完整 URL 供对比
 if (args.Length > 0 && args[0] == "comments3")
 {
