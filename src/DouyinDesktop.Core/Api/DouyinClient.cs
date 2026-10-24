@@ -1332,6 +1332,7 @@ public sealed class DouyinClient : IDisposable
         string url = "https://www.douyin.com" + path + "?" + query;
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
+        AddSecsdkHeaders(req);      // 有些接口（如 profile/self）认这个
 
         using var resp = await _http.SendAsync(req, ct);
         string body = await resp.Content.ReadAsStringAsync(ct);

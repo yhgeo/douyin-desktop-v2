@@ -690,6 +690,79 @@ if (args.Length > 0 && args[0] == "whoami")
     return 0;
 }
 
+// 登录态 vs 游客态的关注流：内容一样就说明服务端根本没认登录
+// dotnet run --project src/DouyinDesktop.Probe -- followguest
+if (args.Length > 0 && args[0] == "followguest")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+    // 第一次：正常登录态
+    using (var c = DouyinClient.Create())
+    {
+        var r = await c.GetFeedScrollAsync(10, 1, "follow/feed");
+        var names = r.Success ? r.Items.Select(x => x.AuthorName).ToList() : new();
+        Console.WriteLine($"=== 登录态 ===  {(r.Success ? $"{names.Count} 条" : r.Message)}");
+        Console.WriteLine("    " + string.Join("、", names.Take(10)));
+    }
+
+    await Task.Delay(1500);
+
+    // 第二次：把内存里的登录 Cookie 清掉（不落盘），当游客
+    using (var c = DouyinClient.Create())
+    {
+        var s = await c.EnsureSessionAsync();
+        s.LoginCookies = "";
+        var r = await c.GetFeedScrollAsync(10, 1, "follow/feed");
+        var names = r.Success ? r.Items.Select(x => x.AuthorName).ToList() : new();
+        Console.WriteLine($"\n=== 游客态（清空登录 Cookie）===  {(r.Success ? $"{names.Count} 条" : r.Message)}");
+        Console.WriteLine("    " + string.Join("、", names.Take(10)));
+    }
+    return 0;
+}
+
+// 两个 webid 的关注流对比：看 follow_status 到底跟着谁走
+// dotnet run --project src/DouyinDesktop.Probe -- followcmp
+if (args.Length > 0 && args[0] == "followcmp")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+    string Read(string name)
+    {
+        string p = Path.Combine(DouyinPaths.DataDirectory, name);
+        return File.Exists(p) ? File.ReadAllText(p).Trim() : "";
+    }
+
+    var cases = new (string Label, string WebId)[]
+    {
+        ("webid-app（本机稳定）", Read("webid-app.txt")),
+        ("webid.txt（浏览器）", Read("webid.txt")),
+    };
+
+    foreach (var (label, wid) in cases)
+    {
+        if (wid.Length < 10) { Console.WriteLine($"{label}：没有值"); continue; }
+
+        Console.WriteLine($"\n=== {label}  webid={wid} ===");
+        var profile = new DeviceProfile { WebId = wid };
+        profile.SetBrowserWebId(wid);
+        using var c = DouyinClient.Create(profile);
+
+        var r = await c.GetFeedScrollAsync(10, 1, "follow/feed");
+        if (!r.Success) { Console.WriteLine("    失败：" + r.Message); await Task.Delay(900); continue; }
+
+        int followed = 0;
+        foreach (var a in r.Items)
+        {
+            bool f = a.Author?.FollowStatus == 1;
+            if (f) followed++;
+            Console.WriteLine($"    [{(f ? "已关注" : "未关注")}] @{a.AuthorName,-16} {a.Desc[..Math.Min(20, a.Desc.Length)]}");
+        }
+        Console.WriteLine($"    → 已关注 {followed}/{r.Items.Count}");
+        await Task.Delay(1200);
+    }
+    return 0;
+}
+
 // 关注流参数对比：现在的参数是从 tab/feed 抄的，可能让服务端按"推荐"排序
 // dotnet run --project src/DouyinDesktop.Probe -- followtest
 if (args.Length > 0 && args[0] == "followtest")
