@@ -1296,6 +1296,48 @@ public sealed class DouyinClient : IDisposable
         }
     }
 
+    // ================= 诊断 =================
+
+    /// <summary>
+    /// 诊断用：按标准签名流程请求任意 `/aweme/v1/web/` 路径，原样返回状态码和 body。
+    ///
+    /// 只给探针用——排查"某个接口到底返回什么"时，比一个个加专用方法快得多。
+    /// 不做解析，也不吞异常（网络错误直接抛，让调用方看见）。
+    /// </summary>
+    public async Task<(int Status, string Body)> GetRawAsync(
+        string path, IEnumerable<KeyValuePair<string, string>>? extra = null,
+        CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+        };
+        if (extra is not null) ps.AddRange(extra);
+        ps.AddRange(_profile.PlatformParams());
+        ps.Add(new("webid", _profile.EffectiveWebId));
+
+        string uifid = session.EffectiveUifid;
+        if (!string.IsNullOrEmpty(uifid)) ps.Add(new("uifid", uifid));
+        ps.Add(new("msToken", session.MsToken));
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+        query += $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                 $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
+
+        string url = "https://www.douyin.com" + path + "?" + query;
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        AddBrowserHeaders(req, session);
+
+        using var resp = await _http.SendAsync(req, ct);
+        string body = await resp.Content.ReadAsStringAsync(ct);
+        return ((int)resp.StatusCode, body);
+    }
+
     // ================= 请求头 =================
 
     /// <summary>

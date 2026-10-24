@@ -591,8 +591,16 @@ public partial class MainWindow : Window
                     _followEmptyStreak = 0;
                 }
 
-                got = r.Items;
                 elapsed = r.ElapsedMs;
+
+                // 关注流是**按发布时间倒序的作品流**，不是"每人一条"。
+                // 短剧/漫剧号一天发几十条，一页 11 条里同一个作者能占 4 条，
+                // 整页看起来就像"大众视频"（实测：11 条里只有 3–4 个不同作者）。
+                // 按作者去重、只留最新一条，一页里能看到更多人。
+                var seenAuthors = new HashSet<string>(StringComparer.Ordinal);
+                got = r.Items
+                    .Where(x => seenAuthors.Add(x.Author?.SecUid ?? x.Id))
+                    .ToList();
             }
             else if (_settings.ImageOnly)
             {

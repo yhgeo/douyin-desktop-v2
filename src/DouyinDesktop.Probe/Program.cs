@@ -644,6 +644,132 @@ if (args.Length > 0 && args[0] == "iplabel")
     return 0;
 }
 
+// 我是谁 + 关注了多少人：dotnet run --project src/DouyinDesktop.Probe -- whoami
+if (args.Length > 0 && args[0] == "whoami")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    string[] candidates =
+    {
+        "/aweme/v1/web/im/user/info/",
+        "/aweme/v1/web/user/profile/self/",
+    };
+
+    foreach (string path in candidates)
+    {
+        try
+        {
+            var (status, body) = await c.GetRawAsync(path);
+            string head = body.Length == 0 ? "(空)" : body[..Math.Min(400, body.Length)];
+            Console.WriteLine($"\n=== {path} ===  HTTP {status}  {body.Length} 字节");
+            Console.WriteLine("  " + head.Replace("\n", " "));
+
+            // 顺手把关键字段挑出来
+            if (body.Length > 2 && body.TrimStart()[0] == '{')
+            {
+                using var doc = JsonDocument.Parse(body);
+                void Show(string name)
+                {
+                    if (doc.RootElement.TryGetProperty(name, out var v))
+                        Console.WriteLine($"  {name} = {(v.ValueKind == JsonValueKind.Object ? "(对象)" : v.ToString())}");
+                }
+                foreach (string f in new[] { "user_id", "sec_user_id", "nickname", "unique_id",
+                                             "follower_count", "following_count", "aweme_count",
+                                             "total_favorited", "mplatform_followers_count" })
+                    Show(f);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n=== {path} ===  异常：{ex.Message}");
+        }
+        await Task.Delay(700);
+    }
+    return 0;
+}
+
+// 关注流参数对比：现在的参数是从 tab/feed 抄的，可能让服务端按"推荐"排序
+// dotnet run --project src/DouyinDesktop.Probe -- followtest
+if (args.Length > 0 && args[0] == "followtest")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var cases = new (string Name, List<KeyValuePair<string, string>> Extra)[]
+    {
+        ("A 现在用的（pull_type=2 + min_window）", new()
+        {
+            new("count", "10"), new("refresh_index", "1"),
+            new("video_type_select", "1"), new("pull_type", "2"),
+            new("min_window", "0"), new("view_count", "2"),
+        }),
+        ("B pull_type=0", new()
+        {
+            new("count", "10"), new("refresh_index", "1"),
+            new("video_type_select", "1"), new("pull_type", "0"),
+            new("min_window", "0"), new("view_count", "2"),
+        }),
+        ("C 精简（只留 count/refresh_index）", new()
+        {
+            new("count", "10"), new("refresh_index", "1"),
+        }),
+    };
+
+    foreach (var (name, extra) in cases)
+    {
+        try
+        {
+            var (status, body) = await c.GetRawAsync("/aweme/v1/web/follow/feed/", extra);
+            var rows = ParseFollowBody(body);
+
+            Console.WriteLine($"\n=== {name} ===  HTTP {status}  {body.Length} 字节  {rows.Count} 条");
+            foreach (var (nick, fs, t) in rows.Take(10))
+            {
+                string when = t > 0 ? DateTimeOffset.FromUnixTimeSeconds(t).ToLocalTime().ToString("MM-dd HH:mm") : "?";
+                Console.WriteLine($"    [{(fs == 1 ? "已关注" : "未关注")}] @{nick,-16} {when}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n=== {name} ===  异常：{ex.Message}");
+        }
+        await Task.Delay(1000);
+    }
+    return 0;
+}
+
+// 关注流 refresh_index 实验：递增会不会拉到更旧的内容
+// dotnet run --project src/DouyinDesktop.Probe -- followri
+if (args.Length > 0 && args[0] == "followri")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    foreach (int ri in new[] { 0, 1, 2, 5, 12 })
+    {
+        var r = await c.GetFeedScrollAsync(10, ri, "follow/feed");
+        if (!r.Success) { Console.WriteLine($"refresh_index={ri,-3} 失败：{r.Message}"); continue; }
+
+        var times = r.Items.Select(x => x.CreateTime).Where(t => t > 0).OrderByDescending(t => t).ToList();
+        string newest = times.Count > 0
+            ? DateTimeOffset.FromUnixTimeSeconds(times[0]).ToLocalTime().ToString("MM-dd HH:mm")
+            : "?";
+        string oldest = times.Count > 0
+            ? DateTimeOffset.FromUnixTimeSeconds(times[^1]).ToLocalTime().ToString("MM-dd HH:mm")
+            : "?";
+        int followed = r.Items.Count(x => x.Author?.FollowStatus == 1);
+
+        Console.WriteLine($"refresh_index={ri,-3} {r.Items.Count,2} 条  已关注 {followed,2}  " +
+                          $"最新 {newest}  最旧 {oldest}  {r.ElapsedMs}ms");
+        await Task.Delay(900);
+    }
+    return 0;
+}
+
 // 关注流：dotnet run --project src/DouyinDesktop.Probe -- follow
 if (args.Length > 0 && args[0] == "follow")
 {
@@ -653,7 +779,17 @@ if (args.Length > 0 && args[0] == "follow")
     foreach (string ep in new[] { "follow/feed", "tab/feed" })
     {
         var r = await cf.GetFeedScrollAsync(10, 2, ep);
-        Console.WriteLine($"  {ep}: " + (r.Success ? $"{r.Items.Count} 条" : r.Message));
+        Console.WriteLine($"\n=== {ep} ===  " + (r.Success ? $"{r.Items.Count} 条" : r.Message));
+        if (!r.Success) continue;
+
+        int followed = 0;
+        foreach (var a in r.Items)
+        {
+            string fs = a.Author?.FollowStatus == 1 ? "已关注" : "未关注";
+            if (a.Author?.FollowStatus == 1) followed++;
+            Console.WriteLine($"    [{fs}] @{a.AuthorName,-16} {a.Desc[..Math.Min(24, a.Desc.Length)]}");
+        }
+        Console.WriteLine($"    → 已关注作者 {followed}/{r.Items.Count} 条");
         await Task.Delay(800);
     }
     return 0;
@@ -711,6 +847,41 @@ else
 }
 
 return probe.Ok ? 0 : 1;
+
+static List<(string Nick, int Follow, long Time)> ParseFollowBody(string body)
+{
+    var list = new List<(string, int, long)>();
+    if (string.IsNullOrWhiteSpace(body) || body.TrimStart()[0] != '{') return list;
+
+    try
+    {
+        using var doc = JsonDocument.Parse(body);
+        if (!doc.RootElement.TryGetProperty("data", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return list;
+
+        foreach (var node in arr.EnumerateArray())
+        {
+            var aw = node.TryGetProperty("aweme", out var a) && a.ValueKind == JsonValueKind.Object ? a : node;
+
+            string nick = "";
+            int fs = -1;
+            if (aw.TryGetProperty("author", out var au) && au.ValueKind == JsonValueKind.Object)
+            {
+                if (au.TryGetProperty("nickname", out var n) && n.ValueKind == JsonValueKind.String)
+                    nick = n.GetString() ?? "";
+                if (au.TryGetProperty("follow_status", out var f) && f.ValueKind == JsonValueKind.Number)
+                    fs = f.GetInt32();
+            }
+
+            long t = aw.TryGetProperty("create_time", out var ct) && ct.ValueKind == JsonValueKind.Number
+                ? ct.GetInt64() : 0;
+
+            list.Add((nick, fs, t));
+        }
+    }
+    catch (JsonException) { }
+    return list;
+}
 
 static string Short(string s, int max)
     => string.IsNullOrEmpty(s) ? "(无文案)" : s.Length <= max ? s : s[..max] + "…";

@@ -70,6 +70,12 @@ public sealed class Author
     [JsonPropertyName("signature")] public string Signature { get; init; } = "";
     [JsonPropertyName("avatar_thumb")] public UrlList? AvatarThumb { get; init; }
 
+    /// <summary>
+    /// 我与这个作者的关系：1 = 已关注，0 = 没关注。
+    /// 用来判断"关注流"里返回的到底是不是关注的人（服务端会偷偷掺推荐）。
+    /// </summary>
+    [JsonPropertyName("follow_status")] public int FollowStatus { get; init; }
+
     [JsonIgnore] public string AvatarUrl => AvatarThumb?.First ?? "";
 }
 
