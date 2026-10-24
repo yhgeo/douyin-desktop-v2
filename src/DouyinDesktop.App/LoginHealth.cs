@@ -12,10 +12,11 @@ public static class LoginHealth
 {
     public enum State
     {
-        Unknown,     // 还没检查过
-        Ok,          // 有效
-        Expired,     // 可能已过期
-        Guest,       // 没登录
+        Unknown,      // 还没检查过
+        Ok,           // 有效
+        Expired,      // 可能已过期
+        Guest,        // 没登录
+        DeviceDrift,  // 登录态还在，但设备标识变了（见下）
     }
 
     public static State Current { get; private set; } = State.Unknown;
@@ -38,6 +39,7 @@ public static class LoginHealth
             State.Ok => "正常",
             State.Expired => "可能已过期，建议重新扫码",
             State.Guest => "未登录",
+            State.DeviceDrift => "设备标识变了，建议重新登录",
             _ => "尚未检查",
         };
     }

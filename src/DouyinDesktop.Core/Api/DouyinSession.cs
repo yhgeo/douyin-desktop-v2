@@ -26,6 +26,18 @@ public sealed class DouyinSession
     public string LoginCookies { get; set; } = "";
 
     /// <summary>
+    /// 登录那一刻用的浏览器 webid。
+    ///
+    /// 服务端把「账号 ↔ 设备标识」的绑定存在它自己那边。webid / ttwid / s_v_web_id
+    /// 只要变一个，这套绑定就失效：登录态还在（评论还能读），但关注流会给填充内容、
+    /// 写接口（点赞）静默失败、`profile/self` 直接说"未登录"。
+    ///
+    /// 存下来是为了启动时能**主动发现**"设备变了"，而不是等用户发现推荐变大众。
+    /// 老版本的 session.json 没有这个字段，是空串，那就跳过检查。
+    /// </summary>
+    public string LoginWebId { get; set; } = "";
+
+    /// <summary>
     /// 服务端在 Set-Cookie 里下发的 UIFID，webSign 签名要用。
     /// 登录 Cookie 里通常只有 UIFID_TEMP，正式的要等第一次请求后才有。
     /// </summary>

@@ -150,13 +150,64 @@ public partial class MainWindow : Window
     private DispatcherTimer? _progressTimer;
     private Action? _healthHandler;
 
-    /// <summary>右下角的登录过期提醒：只有判定过期才显示，点一下直接去登录。</summary>
+    /// <summary>
+    /// 右下角的登录提醒：过期和"设备漂移"都要显示，点一下直接去重新登录。
+    /// 设备漂移更隐蔽——登录态还在、评论还能读，但推荐会变通用、点赞静默失败。
+    /// </summary>
     private void UpdateExpiredBadge()
     {
         if (ExpiredBadge is null) return;
-        ExpiredBadge.Visibility = LoginHealth.Current == LoginHealth.State.Expired
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+
+        var state = LoginHealth.Current;
+        bool show = state is LoginHealth.State.Expired or LoginHealth.State.DeviceDrift;
+
+        ExpiredBadge.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+
+        if (show && ExpiredBadgeTitle is not null)
+            ExpiredBadgeTitle.Text = state == LoginHealth.State.DeviceDrift
+                ? "设备标识变了"
+                : "登录已过期";
+    }
+
+    /// <summary>
+    /// 登录态还在，但设备标识已经和登录时不一样了。
+    ///
+    /// 服务端把「账号 ↔ 设备」的绑定存在它自己那边，webid / ttwid / s_v_web_id
+    /// 只要变一个，绑定就失效：评论还能读（所以健康检查会说"正常"），
+    /// 但关注流会给填充内容、点赞静默失败、`profile/self` 直接说"未登录"。
+    ///
+    /// 2026-10-25 踩过一次：改了 webid 没重新登录，表现是"推荐变成大众视频"。
+    /// 与其等用户自己发现，不如启动时主动查一遍。
+    /// </summary>
+    private void CheckDeviceDrift()
+    {
+        try
+        {
+            var session = DouyinSession.Load();
+            if (session is null || !session.IsLoggedIn) return;
+
+            string current = _client.Profile.BrowserWebId;
+            if (current.Length == 0) return;
+
+            if (session.LoginWebId.Length == 0)
+            {
+                // 老版本登录的会话没记过这个字段。把当前值当基准记下来，
+                // 不用为了这个再让用户重新登录一次。
+                session.LoginWebId = current;
+                session.Save();
+                AppLog.Write($"[设备] 补记 webid 基准：{current}");
+                return;
+            }
+
+            if (current == session.LoginWebId) return;
+
+            AppLog.Write($"[设备] webid 变了：登录时 {session.LoginWebId}，现在 {current} —— 建议重新登录");
+            LoginHealth.Set(LoginHealth.State.DeviceDrift);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("设备漂移检查失败：" + ex.Message);
+        }
     }
 
     private void OnExpiredBadgeClick(object sender, MouseButtonEventArgs e)
@@ -288,6 +339,7 @@ public partial class MainWindow : Window
 
         InjectDemoImageIfRequested();
         RefreshShortcuts();
+        CheckDeviceDrift();
 
         // 调试用：--author=<sec_uid> 直接打开某个作者的作品列表
         string? authorArg = Environment.GetCommandLineArgs()
@@ -2558,6 +2610,10 @@ public partial class MainWindow : Window
         // 登录窗口会顺手把浏览器真实 webid 写进 data/webid.txt，
         // 这里必须重读——否则强校验接口（主页/详情）还拿着旧 webid，会返回空 body。
         _client.Profile.RefreshBrowserWebId();
+
+        // 记下"这套登录态绑定的是哪个 webid"。下次启动如果发现 webid 变了，
+        // 说明服务端那边的「账号↔设备」绑定已经失效，要提醒重新登录。
+        session.LoginWebId = _client.Profile.BrowserWebId;
         session.Save();
 
         _client.ResetLoginExpiredFlag();

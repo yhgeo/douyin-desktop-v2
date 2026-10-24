@@ -464,7 +464,7 @@
                                 Margin="0,10,0,0" HorizontalAlignment="Left"
                                 MouseLeftButtonUp="OnExpiredBadgeClick" Cursor="Hand">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="登录已过期" FontSize="11" FontWeight="SemiBold"
+                                <TextBlock x:Name="ExpiredBadgeTitle" Text="登录已过期" FontSize="11" FontWeight="SemiBold"
                                            Foreground="#FE2C55" VerticalAlignment="Center" />
                                 <TextBlock Text="　点这里重新登录" FontSize="11"
                                            Foreground="#C86A7C" VerticalAlignment="Center" />
