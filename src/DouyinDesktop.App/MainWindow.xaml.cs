@@ -198,8 +198,12 @@ public partial class MainWindow : Window
                 // 老版本登录的会话没记过这个字段。把当前值当基准记下来，
                 // 不用为了这个再让用户重新登录一次。
                 session.LoginWebId = current;
-                session.Save();
-                AppLog.Write($"[设备] 补记 webid 基准：{current}");
+
+                if (session.Save())
+                    AppLog.Write($"[设备] 补记 webid 基准：{current}");
+                else
+                    AppLog.Write($"[设备] 补记基准失败（session.json 写不进去），下次启动会重试");
+
                 return;
             }
 

@@ -230,7 +230,8 @@ public sealed class DouyinSession
         }
     }
 
-    public void Save(string? path = null)
+    /// <summary>存盘。返回是否成功——写不进去时调用方要能知道（比如设备基准补记）。</summary>
+    public bool Save(string? path = null)
     {
         path ??= DefaultPath;
         try
@@ -238,10 +239,12 @@ public sealed class DouyinSession
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, JsonSerializer.Serialize(this,
                 new JsonSerializerOptions { WriteIndented = true }));
+            return true;
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // 存不下就算了，下次重新注册
+            return false;
         }
     }
 }
