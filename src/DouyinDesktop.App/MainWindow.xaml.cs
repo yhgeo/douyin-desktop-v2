@@ -2527,6 +2527,10 @@ public partial class MainWindow : Window
         if (uifid.Length > 0) session.Uifid = uifid;
 
         AppLog.Write($"登录后同步设备标识：ttwid {ttwid.Length} 字符，s_v_web_id {svWebId.Length} 字符，UIFID {uifid.Length} 字符");
+
+        // 登录窗口会顺手把浏览器真实 webid 写进 data/webid.txt，
+        // 这里必须重读——否则强校验接口（主页/详情）还拿着旧 webid，会返回空 body。
+        _client.Profile.RefreshBrowserWebId();
         session.Save();
 
         _client.ResetLoginExpiredFlag();

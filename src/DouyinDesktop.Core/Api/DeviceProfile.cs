@@ -31,8 +31,16 @@ public sealed class DeviceProfile
     /// 强校验接口（作者作品 / 作品详情）必须用它：服务端核对的是
     /// "这个设备 + 这份 Cookie 真实用过哪个 webid"。
     /// 拿不到时退回 <see cref="WebId"/>。
+    ///
+    /// 重新登录后文件会变，记得调 <see cref="RefreshBrowserWebId"/>。
     /// </summary>
-    public string BrowserWebId { get; init; } = LoadBrowserWebId();
+    public string BrowserWebId { get; private set; } = LoadBrowserWebId();
+
+    /// <summary>重新登录后调用：登录窗口可能刚把 webid.txt 换成新值。</summary>
+    public void RefreshBrowserWebId() => BrowserWebId = LoadBrowserWebId();
+
+    /// <summary>探针专用：直接指定 webid，绕开文件。正常流程不要调。</summary>
+    public void SetBrowserWebId(string webId) => BrowserWebId = webId;
 
     /// <summary>强校验接口该用的 webid：有浏览器真实值就用它。</summary>
     public string EffectiveWebId => BrowserWebId.Length > 0 ? BrowserWebId : WebId;

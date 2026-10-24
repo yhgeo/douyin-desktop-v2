@@ -411,7 +411,8 @@ if (args.Length > 0 && args[0] == "webidcmp")
         if (wid.Length < 10) { Console.WriteLine($"{label}：没有值，跳过"); continue; }
 
         Console.WriteLine($"\n=== {label}  webid={wid} ===");
-        var profile = new DeviceProfile { WebId = wid, BrowserWebId = wid };
+        var profile = new DeviceProfile { WebId = wid };
+        profile.SetBrowserWebId(wid);
         using var c = DouyinClient.Create(profile);
         c.Log += m => Console.WriteLine("    " + m);
 
