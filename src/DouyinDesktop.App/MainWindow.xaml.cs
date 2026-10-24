@@ -2509,20 +2509,24 @@ public partial class MainWindow : Window
     /// <summary>扫码登录。返回是否真的登上了（取消或失败返回 false）。</summary>
     private async Task<bool> HandleLoginAsync()
     {
-        // 判定过期时，必须先把浏览器里的旧登录清掉再弹窗——
-        // 否则页面一打开就是"已登录"，窗口一闪就关，抓回来还是过期 Cookie。
-        // （设置页的「重新登录」和右下角徽章都走这里）
-        if (LoginHealth.Current == LoginHealth.State.Expired)
+        // 只要当前**已经有登录态**（不管健康检查说它是正常还是过期），
+        // 点「重新登录」就必须先把浏览器里的旧登录清掉再弹窗。
+        //
+        // 以前只在 Expired 时清：已登录状态点「重新登录」，登录窗口一打开
+        // 页面就是"已登录"，窗口一闪就关，抓回来还是原来那份 Cookie
+        // —— 等于什么都没做，用户会以为"重新登录了但没变化"。
+        var previous = _client.Session;
+        if (previous?.IsLoggedIn == true)
         {
             ClearWebViewProfile();
-            var old = _client.Session;
-            if (old is not null)
-            {
-                old.LoginCookies = "";
-                old.Uifid = "";
-                old.Save();
-            }
+
+            previous.LoginCookies = "";
+            previous.Uifid = "";
+            previous.Save();
+
             _browserSyncTried = false;
+            _emptyStreak = 0;
+            LoginHealth.Set(LoginHealth.State.Guest);
         }
 
         var win = new LoginWindow { Owner = this };
