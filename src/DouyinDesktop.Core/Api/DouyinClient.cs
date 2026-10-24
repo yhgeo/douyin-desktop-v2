@@ -634,6 +634,23 @@ public sealed class DouyinClient : IDisposable
 
         if (session.MsToken.Length > 0) query = SetParam(query, "msToken", session.MsToken);
 
+        // 模板是**抓取那一刻**的设备环境，里面存着当时的 webid / uifid / s_v_web_id。
+        // 设备标识变了（重新登录、清过浏览器数据、换机器）还照抄旧值，就是
+        // "新 Cookie 配旧设备"——服务端直接返回空 body，而且**不报错**。
+        // 2026-10-25 就因为这个：重新登录后评论全空，主页却正常。
+        string webId = _profile.EffectiveWebId;
+        if (webId.Length > 0) query = SetParam(query, "webid", webId);
+
+        string uifid = session.EffectiveUifid;
+        if (uifid.Length > 0) query = SetParam(query, "uifid", uifid);
+
+        string svWebId = session.EffectiveSvWebId;
+        if (svWebId.Length > 0)
+        {
+            query = SetParam(query, "verifyFp", svWebId);
+            query = SetParam(query, "fp", svWebId);
+        }
+
         string sign = _signer.SignQuery(query, "", "www.douyin.com");
         return head + query + "&a_bogus=" + UrlCodec.Quote(sign);
     }
@@ -1337,6 +1354,30 @@ public sealed class DouyinClient : IDisposable
         using var resp = await _http.SendAsync(req, ct);
         string body = await resp.Content.ReadAsStringAsync(ct);
         return ((int)resp.StatusCode, body);
+    }
+
+    /// <summary>
+    /// 诊断用：返回推荐流的**原始 body**（不解析）。
+    /// 想确认某个字段（比如话题标签 text_extra）到底有没有、长什么样，只能看原文。
+    /// </summary>
+    public async Task<string> GetFeedRawAsync(int count = 6, CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+
+        int refreshIndex = _refreshIndex++;
+        var ps = _profile.FeedParams(count, "", session.MsToken, refreshIndex, session.EffectiveUifid);
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+        string url = "https://www.douyin.com/aweme/v1/web/module/feed/?" + query +
+                     $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                     $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        AddBrowserHeaders(req, session);
+
+        using var resp = await _http.SendAsync(req, ct);
+        return await resp.Content.ReadAsStringAsync(ct);
     }
 
     // ================= 请求头 =================

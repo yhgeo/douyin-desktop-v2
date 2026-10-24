@@ -442,6 +442,137 @@ if (args.Length > 0 && args[0] == "user")
     return 0;
 }
 
+// 标签覆盖率：dotnet run --project src/DouyinDesktop.Probe -- tags
+// 判断"按标签做自定义推荐"可不可行——先看有多少作品带标签。
+if (args.Length > 0 && args[0] == "tags")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var counter = new Dictionary<string, int>(StringComparer.Ordinal);
+    int total = 0, withTag = 0, tagSum = 0;
+
+    for (int page = 0; page < 2; page++)
+    {
+        string body = await c.GetFeedRawAsync(10);
+        if (body.Length == 0) { Console.WriteLine("空 body"); break; }
+
+        var nodes = new List<JsonElement>();
+        using (var doc = JsonDocument.Parse(body))
+        {
+            if (doc.RootElement.TryGetProperty("aweme_list", out var al) && al.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var a in al.EnumerateArray()) nodes.Add(a.Clone());
+            }
+            else if (doc.RootElement.TryGetProperty("cards", out var cards) && cards.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var card in cards.EnumerateArray())
+                {
+                    if (!card.TryGetProperty("aweme", out var aw)) continue;
+                    if (aw.ValueKind == JsonValueKind.String)
+                    {
+                        try { using var inner = JsonDocument.Parse(aw.GetString()!); nodes.Add(inner.RootElement.Clone()); }
+                        catch (JsonException) { }
+                    }
+                    else if (aw.ValueKind == JsonValueKind.Object) nodes.Add(aw.Clone());
+                }
+            }
+        }
+
+        foreach (var aw in nodes)
+        {
+            total++;
+            var tags = new List<string>();
+            if (aw.TryGetProperty("text_extra", out var te) && te.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var t in te.EnumerateArray())
+                {
+                    if (t.TryGetProperty("hashtag_name", out var h) && h.ValueKind == JsonValueKind.String)
+                    {
+                        string name = h.GetString() ?? "";
+                        if (name.Length > 0) tags.Add(name);
+                    }
+                }
+            }
+
+            if (tags.Count > 0) withTag++;
+            tagSum += tags.Count;
+            foreach (string t in tags) counter[t] = counter.GetValueOrDefault(t) + 1;
+
+            string nick = "";
+            if (aw.TryGetProperty("author", out var au) && au.TryGetProperty("nickname", out var n) && n.ValueKind == JsonValueKind.String)
+                nick = n.GetString() ?? "";
+
+            Console.WriteLine($"  @{nick,-14} {(tags.Count == 0 ? "(无标签)" : string.Join(" ", tags.Select(x => "#" + x)))}");
+        }
+        await Task.Delay(1200);
+    }
+
+    Console.WriteLine($"\n共 {total} 条，带标签 {withTag} 条（{(total == 0 ? 0 : withTag * 100 / total)}%），" +
+                      $"平均每条 {(total == 0 ? 0 : tagSum / total)} 个标签");
+    Console.WriteLine("\n出现最多的标签：");
+    foreach (var (name, n) in counter.OrderByDescending(x => x.Value).Take(12))
+        Console.WriteLine($"    {n,2}  #{name}");
+    return 0;
+}
+
+// 作品有哪些字段：dotnet run --project src/DouyinDesktop.Probe -- fields
+// 回答"推荐视频有没有标签"——模型里没有的字段只能看原始 JSON。
+if (args.Length > 0 && args[0] == "fields")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    string body = await c.GetFeedRawAsync(6);
+    Console.WriteLine($"原始长度 {body.Length}");
+    if (body.Length == 0) { Console.WriteLine("空 body"); return 1; }
+
+    using var doc = JsonDocument.Parse(body);
+
+    JsonElement? sample = null;
+    if (doc.RootElement.TryGetProperty("aweme_list", out var al) && al.ValueKind == JsonValueKind.Array)
+        sample = al.EnumerateArray().FirstOrDefault();
+    else if (doc.RootElement.TryGetProperty("cards", out var cards) && cards.ValueKind == JsonValueKind.Array)
+    {
+        foreach (var card in cards.EnumerateArray())
+        {
+            if (!card.TryGetProperty("aweme", out var aw)) continue;
+            if (aw.ValueKind == JsonValueKind.String)
+                sample = JsonDocument.Parse(aw.GetString()!).RootElement;
+            else if (aw.ValueKind == JsonValueKind.Object)
+                sample = aw;
+            if (sample is not null) break;
+        }
+    }
+
+    if (sample is null) { Console.WriteLine("没找到作品节点"); return 1; }
+
+    var keys = sample.Value.EnumerateObject().Select(x => x.Name).ToList();
+    Console.WriteLine($"\n作品字段（{keys.Count} 个）：");
+    for (int i = 0; i < keys.Count; i += 6)
+        Console.WriteLine("    " + string.Join("  ", keys.Skip(i).Take(6)));
+
+    // 重点看标签类字段
+    foreach (string k in new[] { "text_extra", "cha_list", "tag", "anchor_info",
+                                 "video_tag", "suggest_words", "seo_info" })
+    {
+        if (!sample.Value.TryGetProperty(k, out var v)) continue;
+        string txt = v.ValueKind switch
+        {
+            JsonValueKind.Null => "null",
+            JsonValueKind.Array => $"[{v.GetArrayLength()} 项]",
+            JsonValueKind.Object => "(对象)",
+            _ => v.ToString(),
+        };
+        Console.WriteLine($"\n  ★ {k} = {txt}");
+        if (v.ValueKind == JsonValueKind.Array && v.GetArrayLength() > 0)
+            Console.WriteLine("    首项：" + v[0].ToString()[..Math.Min(300, v[0].ToString().Length)]);
+    }
+    return 0;
+}
+
 // 点赞状态来源调查：dotnet run --project src/DouyinDesktop.Probe -- diggstate
 // 回答一个问题：推荐流本身给不给 user_digged？不给的话只能逐条查详情。
 if (args.Length > 0 && args[0] == "diggstate")
