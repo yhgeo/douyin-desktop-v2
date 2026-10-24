@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using DouyinDesktop.Core;
 
 namespace DouyinDesktop.App;
@@ -42,23 +43,8 @@ public partial class SettingsWindow : Window
         DataPathText.Text = DouyinDesktop.Core.DouyinPaths.DataDirectory;
         ImageOnlyCheck.IsChecked = settings.ImageOnly;
 
-        // 标签分组：先填文本（会触发一次 TextChanged，那里有 null guard）
-        if (TagGroupBox is not null) TagGroupBox.Text = settings.TagGroupText;
-        UpdateTagGroupHint();
+        InitTagGroups(settings);
 
-        // 每批拉取条数
-        if (BatchSizeBox is not null)
-        {
-            foreach (var obj in BatchSizeBox.Items)
-            {
-                if (obj is ComboBoxItem it && it.Tag?.ToString() == settings.FeedBatchSize.ToString())
-                {
-                    BatchSizeBox.SelectedItem = it;
-                    break;
-                }
-            }
-            if (BatchSizeBox.SelectedItem is null) BatchSizeBox.SelectedIndex = 0;
-        }
         LoadDanmakuUi();
         RefreshAccount();
 
@@ -76,53 +62,182 @@ public partial class SettingsWindow : Window
     private void OnNavPlay(object sender, RoutedEventArgs e) => SwitchPage("play");
     private void OnNavAbout(object sender, RoutedEventArgs e) => SwitchPage("about");
 
-    /// <summary>
-    /// 标签分组文本改了。
-    ///
-    /// ⚠️ WPF 在 XAML 解析阶段就会触发一次 TextChanged，那时构造函数里的字段
-    /// （_settings、其它命名控件）还是 null —— 必须 guard，否则设置窗口直接弹"出错了"。
-    /// </summary>
-    /// <summary>
-    /// 每批拉多少条。
-    /// ⚠️ 同样要在 XAML 解析阶段 guard —— SelectionChanged 会比构造函数先跑。
-    /// </summary>
-    private void OnBatchSizeChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_settings is null || BatchSizeBox?.SelectedItem is not ComboBoxItem item) return;
-        if (!int.TryParse(item.Tag?.ToString(), out int size)) return;
+    // ================= 标签分组 =================
 
-        _settings.FeedBatchSize = size;
-        _settings.Save();
+    private List<(string Name, string Rules)> _groups = new();
+    private int _groupIndex;
+
+    /// <summary>
+    /// 载入分组时会给 TextBox 赋文本，那会触发 TextChanged。
+    /// 用这个标志挡住，免得"载入"被当成"用户编辑"。
+    /// </summary>
+    private bool _loadingGroup;
+
+    private void InitTagGroups(AppSettings settings)
+    {
+        var parsed = TagGroups.Parse(settings.TagGroupText);
+        _groups = parsed.Items.Select(g => (g.Name, g.Rules)).ToList();
+        if (_groups.Count == 0) _groups.Add(("默认", ""));
+
+        _groupIndex = _groups.FindIndex(g => g.Name == settings.ActiveTagGroup);
+        if (_groupIndex < 0) _groupIndex = 0;
+
+        RefreshGroupTabs();
+        LoadGroup(_groupIndex);
     }
 
-    private void OnTagGroupChanged(object sender, TextChangedEventArgs e)
+    /// <summary>重画顶部的分组按钮，当前组高亮。</summary>
+    private void RefreshGroupTabs()
     {
-        if (_settings is null || TagGroupBox is null) return;
+        if (GroupTabs is null) return;
+        GroupTabs.Children.Clear();
 
-        _settings.TagGroupText = TagGroupBox.Text;
-
-        // 当前组可能被改名/删掉了，重新校准一次
-        var groups = TagGroups.Parse(_settings.TagGroupText);
-        if (!groups.IsEmpty && !groups.Items.Any(g => g.Name == _settings.ActiveTagGroup))
-            _settings.ActiveTagGroup = groups.Items[0].Name;
-
-        _settings.Save();
-        UpdateTagGroupHint();
-    }
-
-    private void UpdateTagGroupHint()
-    {
-        if (TagGroupHint is null) return;
-
-        var groups = TagGroups.Parse(TagGroupBox?.Text);
-        if (groups.IsEmpty)
+        for (int i = 0; i < _groups.Count; i++)
         {
-            TagGroupHint.Text = "留空 = 不过滤，按抖音原样推荐";
+            int idx = i;
+            bool active = idx == _groupIndex;
+
+            var btn = new Button
+            {
+                Content = _groups[i].Name,
+                Margin = new Thickness(0, 0, 8, 6),
+                Padding = new Thickness(13, 5, 13, 5),
+                FontSize = 12,
+                Cursor = Cursors.Hand,
+                BorderThickness = new Thickness(0),
+                Background = new SolidColorBrush(active ? Color.FromRgb(0x2C, 0x2C, 0x38) : Color.FromRgb(0x17, 0x17, 0x1E)),
+                Foreground = new SolidColorBrush(active ? Color.FromRgb(0xF2, 0xF2, 0xF6) : Color.FromRgb(0x82, 0x82, 0x90)),
+            };
+            btn.Click += (_, _) => SelectGroup(idx);
+            GroupTabs.Children.Add(btn);
+        }
+    }
+
+    private void SelectGroup(int index)
+    {
+        if (_loadingGroup) return;
+        if (index < 0 || index >= _groups.Count || index == _groupIndex) return;
+
+        SaveCurrentGroup();
+        _groupIndex = index;
+
+        RefreshGroupTabs();
+        LoadGroup(index);
+        PersistGroups();
+    }
+
+    private void LoadGroup(int index)
+    {
+        if (GroupNameBox is null || GroupRulesBox is null) return;
+
+        _loadingGroup = true;
+        try
+        {
+            GroupNameBox.Text = _groups[index].Name;
+            GroupRulesBox.Text = _groups[index].Rules;
+        }
+        finally
+        {
+            _loadingGroup = false;
+        }
+
+        UpdateGroupHint();
+    }
+
+    /// <summary>把界面上的内容写回内存里的当前组（不落盘）。</summary>
+    private void SaveCurrentGroup()
+    {
+        if (_groups.Count == 0 || GroupNameBox is null || GroupRulesBox is null) return;
+
+        string name = GroupNameBox.Text.Trim();
+        if (name.Length == 0) name = _groups[_groupIndex].Name;   // 空名字不接受，保留原来的
+
+        _groups[_groupIndex] = (name, GroupRulesBox.Text);
+    }
+
+    /// <summary>序列化回 app-settings.json，并记住当前生效的组。</summary>
+    private void PersistGroups()
+    {
+        if (_settings is null) return;
+
+        _settings.TagGroupText = string.Join("\n\n",
+            _groups.Where(g => g.Name.Length > 0).Select(g => $"[{g.Name}]\n{g.Rules}"));
+
+        _settings.ActiveTagGroup = _groups.Count > _groupIndex ? _groups[_groupIndex].Name : "";
+        _settings.Save();
+    }
+
+    private void OnGroupRulesChanged(object sender, TextChangedEventArgs e)
+    {
+        // ⚠️ XAML 解析阶段就会触发一次，那时 _settings 还是 null
+        if (_settings is null || _loadingGroup) return;
+
+        SaveCurrentGroup();
+        PersistGroups();
+        UpdateGroupHint();
+    }
+
+    private void OnGroupNameChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_settings is null || _loadingGroup) return;
+
+        SaveCurrentGroup();
+        RefreshGroupTabs();      // Tab 上的名字要跟着变
+        PersistGroups();
+    }
+
+    private void OnAddGroup(object sender, RoutedEventArgs e)
+    {
+        SaveCurrentGroup();
+
+        // 自动起个不重名的名字，用户想改直接改上面那个框
+        int n = _groups.Count + 1;
+        string name = $"分组{n}";
+        while (_groups.Any(g => g.Name == name)) name = $"分组{++n}";
+
+        _groups.Add((name, ""));
+        _groupIndex = _groups.Count - 1;
+
+        RefreshGroupTabs();
+        LoadGroup(_groupIndex);
+        PersistGroups();
+
+        GroupRulesBox?.Focus();
+    }
+
+    private void OnDeleteGroup(object sender, RoutedEventArgs e)
+    {
+        if (_groups.Count <= 1)
+        {
+            UpdateGroupHint("至少要留一个分组");
             return;
         }
 
-        var names = string.Join(" / ", groups.Items.Select(g => g.Name));
-        TagGroupHint.Text = $"{groups.Items.Count} 个分组：{names}　·　当前：{groups.Describe(_settings?.ActiveTagGroup)}";
+        string removed = _groups[_groupIndex].Name;
+        _groups.RemoveAt(_groupIndex);
+
+        if (_groupIndex >= _groups.Count) _groupIndex = _groups.Count - 1;
+
+        RefreshGroupTabs();
+        LoadGroup(_groupIndex);
+        PersistGroups();
+
+        UpdateGroupHint($"已删除「{removed}」");
+    }
+
+    private void UpdateGroupHint(string? overrideText = null)
+    {
+        if (GroupHint is null) return;
+
+        if (overrideText is not null)
+        {
+            GroupHint.Text = overrideText;
+            return;
+        }
+
+        var rule = TagRule.Parse(_groups.Count > _groupIndex ? _groups[_groupIndex].Rules : "");
+        string summary = rule.IsEmpty ? "不过滤" : rule.Describe();
+        GroupHint.Text = $"当前组：{_groups[_groupIndex].Name}　·　{summary}　·　切组键在「快捷键」里绑";
     }
 
     private void OnImageOnlyChanged(object sender, RoutedEventArgs e)

@@ -53,13 +53,13 @@ public sealed class AppSettings
     public string ActiveTagGroup { get; set; } = "";
 
     /// <summary>
-    /// 每批拉多少条。抖音接口对 count 没硬上限（实测 80 条能返回 77 条），
-    /// 但每条 JSON 约 150KB —— 20 条约 3MB，80 条约 12MB。
+    /// 每批拉多少条。**固定 10**，不再开放给用户调——
+    /// 过滤导致条数不够时由加载逻辑自己多拉几轮（见 LoadFeedAsync）。
     ///
-    /// 标签过滤会筛掉不少，所以开了过滤时建议调大；只关心速度就保持 20。
-    /// 注意：这里拉的是**纯信息**（视频地址、标签、统计），视频文件只在播放/预取时才下载。
+    /// 抖音接口对 count 没硬上限（实测 80 条能返回 77 条），但每条 JSON 约 150KB。
+    /// 拉的是**纯信息**（视频地址、标签、统计），视频文件只在播放/预取时才下载。
     /// </summary>
-    public int FeedBatchSize { get; set; } = 20;
+    public int FeedBatchSize { get; set; } = 10;
 
     /// <summary>
     /// 显示弹幕。默认关——不是每个视频都有弹幕，而且渲染走的是 mpv 的字幕轨，

@@ -669,21 +669,45 @@ public partial class MainWindow : Window
             }
             else
             {
-                // 两个推荐接口交替用：module/feed 和 tab/feed 的内容池不同，
-                // 混着拉能增加内容多样性（图集比例也会略有提升）
-                var result = _useScrollFeed
-                    ? await _client.GetFeedScrollAsync(_settings.FeedBatchSize, _refreshIndex++)
-                    : await _client.GetFeedAsync(_settings.FeedBatchSize, _presented);
-                _useScrollFeed = !_useScrollFeed;
+                // 标签过滤会让一批剩不下几条，所以**循环拉到够 10 条**（最多 6 轮）。
+                //
+                // 每轮 10 条信息、最多 60 条；拉的是 JSON（地址/标签/统计），
+                // **不下载视频**——视频只在播放和预取时才拉。
+                const int Target = 10;
+                const int MaxRounds = 6;
 
-                if (!result.Success)
+                var rule = CurrentTagRule;
+                var collected = new List<Aweme>();
+                var seen = new HashSet<string>(_presented, StringComparer.Ordinal);
+
+                for (int round = 0; round < MaxRounds && collected.Count < Target; round++)
                 {
-                    SetStatus("获取失败：" + result.Message);
-                    return;
+                    // 两个推荐接口交替用：内容池不同，混着拉能增加多样性
+                    var result = _useScrollFeed
+                        ? await _client.GetFeedScrollAsync(_settings.FeedBatchSize, _refreshIndex++)
+                        : await _client.GetFeedAsync(_settings.FeedBatchSize, seen);
+                    _useScrollFeed = !_useScrollFeed;
+
+                    if (!result.Success)
+                    {
+                        if (collected.Count == 0) { SetStatus("获取失败：" + result.Message); return; }
+                        break;
+                    }
+
+                    elapsed += result.ElapsedMs;
+
+                    var kept = rule.IsEmpty
+                        ? (IReadOnlyList<Aweme>)result.Items
+                        : result.Items.Where(rule.Allows).ToList();
+
+                    collected.AddRange(kept);
+                    foreach (var a in kept) seen.Add(a.Id);
+
+                    if (result.Items.Count == 0) break;   // 服务端没有更多了
+                    if (rule.IsEmpty) break;              // 不过滤，一批就够
                 }
 
-                got = result.Items;
-                elapsed = result.ElapsedMs;
+                got = collected;
             }
 
             // 标签过滤：用户配了"只看/屏蔽"就在这里筛掉。
@@ -752,24 +776,20 @@ public partial class MainWindow : Window
     private TagRule CurrentTagRule => TagRule.Parse(CurrentTagGroups.RulesOf(_settings.ActiveTagGroup));
 
     /// <summary>
-    /// 画标签行：作者标签在前，平台分类在后（用 ｜ 隔开）。
-    /// 平台标签（video_tag）比作者标签规整得多——是"美食 → 美食探店 → 餐厅探店"这种分级。
+    /// 画标签行：**只显示平台标签**（video_tag）。
+    ///
+    /// 平台标签比作者自己写的话题规整得多——是"美食 → 美食探店 → 餐厅探店"这种分级，
+    /// 作者标签则五花八门（"抖音创作者大会""Reddit 有声小说"混在一起）。
+    /// 没有平台标签就整行隐藏，不拿作者标签凑数。
     /// </summary>
     private void UpdateTagText(Aweme item)
     {
         if (TagText is null) return;
 
-        var parts = new List<string>();
+        var tags = _officialTags.Count > 0 ? _officialTags : item.OfficialTags;
 
-        var author = item.Hashtags;
-        if (author.Count > 0)
-            parts.Add(string.Join("  ", author.Select(t => "#" + t)));
-
-        if (_officialTags.Count > 0)
-            parts.Add("官方　" + string.Join(" · ", _officialTags));
-
-        TagText.Text = string.Join("\n", parts);
-        TagText.Visibility = parts.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        TagText.Text = string.Join("  ·  ", tags);
+        TagText.Visibility = tags.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
     /// <summary>
