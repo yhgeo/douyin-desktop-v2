@@ -43,6 +43,10 @@ public sealed class TagGroups
         names.Add(current);
         bodies[current] = new StringBuilder();
 
+        // 区分"隐式默认组"（纯文本、没写 [默认]）和"用户显式建的 [默认]"。
+        // 前者为空说明整段文本是空的，不该造出组；后者是用户主动建的，空也要留。
+        bool defaultDeclared = false;
+
         foreach (string rawLine in text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
         {
             string line = rawLine.Trim();
@@ -58,6 +62,8 @@ public sealed class TagGroups
                     names.Add(name);
                     bodies[name] = new StringBuilder();
                 }
+                if (name == DefaultName) defaultDeclared = true;
+
                 current = name;
                 continue;
             }
@@ -72,7 +78,7 @@ public sealed class TagGroups
             // 只有"隐式的默认组"为空时才跳过（纯空文本不该造出一个组）。
             // **显式写了 [组名] 的组，即使规则为空也要保留** —— 否则用户新建的空分组
             // 一保存就消失，看起来像"分组被吞了"。
-            if (name == DefaultName && body.Length == 0) continue;
+            if (name == DefaultName && body.Length == 0 && !defaultDeclared) continue;
 
             groups.Items.Add(new Group(name, body));
         }

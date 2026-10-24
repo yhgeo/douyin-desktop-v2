@@ -84,6 +84,10 @@ public partial class SettingsWindow : Window
 
         RefreshGroupTabs();
         LoadGroup(_groupIndex);
+
+        // 留个痕迹：分组"消失"这类问题，看一眼日志就知道存了几个、读到几个
+        AppLog.Write($"[分组] 载入 {_groups.Count} 个：" +
+                     string.Join(" / ", _groups.Select(g => $"{g.Name}({g.Rules.Length}字)")));
     }
 
     /// <summary>重画顶部的分组按钮，当前组高亮。</summary>
@@ -161,7 +165,7 @@ public partial class SettingsWindow : Window
         if (_settings is null) return;
 
         _settings.TagGroupText = string.Join("\n\n",
-            _groups.Where(g => g.Name.Length > 0).Select(g => $"[{g.Name}]\n{g.Rules}"));
+            _groups.Select(g => $"[{g.Name}]\n{g.Rules}"));
 
         _settings.ActiveTagGroup = _groups.Count > _groupIndex ? _groups[_groupIndex].Name : "";
         _settings.Save();

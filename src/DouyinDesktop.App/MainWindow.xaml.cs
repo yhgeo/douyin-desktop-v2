@@ -713,8 +713,12 @@ public partial class MainWindow : Window
                     }
                     added += _items.Count - before;
 
-                    // 第一轮只要有内容就先播上，后面的轮次在后台继续补
-                    if (!started && _items.Count > 0)
+                    // 第一轮只要有内容就先播上，后面的轮次在后台继续补。
+                    //
+                    // ⚠️ 必须带 `_index < 0`：只有"还没开始播"时才跳第一条。
+                    // 漏了这个判断的话，翻到第 8 条时触发的补货（EnsureBuffer）
+                    // 会把正在看的视频跳回列表第一个。
+                    if (!started && _index < 0 && _items.Count > 0)
                     {
                         started = true;
                         await PlayIndexAsync(0);

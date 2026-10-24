@@ -97,6 +97,33 @@ public class TagGroupsTests
     }
 
     [Fact]
+    public void 序列化再解析空组还在()
+    {
+        // 模拟设置页的保存格式：组之间 \n\n，组名 [] 包住，规则原样
+        var groups = new (string Name, string Rules)[]
+        {
+            ("美女", "写真\r\n美女"),
+            ("分组3", ""),                 // 新建了但没填标签
+        };
+
+        string text = string.Join("\n\n", groups.Select(g => $"[{g.Name}]\n{g.Rules}"));
+
+        var parsed = TagGroups.Parse(text);
+        Assert.Equal(2, parsed.Items.Count);
+        Assert.Equal("分组3", parsed.Items[1].Name);
+        Assert.Equal("", parsed.Items[1].Rules);
+    }
+
+    [Fact]
+    public void 显式声明的默认组为空也要保留()
+    {
+        // 用户就一个组，名字叫"默认"，还没填标签 —— 不能消失
+        var g = TagGroups.Parse("[默认]\n");
+        Assert.Single(g.Items);
+        Assert.Equal("默认", g.Items[0].Name);
+    }
+
+    [Fact]
     public void 纯空文本不会造出默认组()
     {
         Assert.True(TagGroups.Parse("").IsEmpty);
