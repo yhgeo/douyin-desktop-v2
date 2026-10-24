@@ -1372,7 +1372,7 @@ public sealed class DouyinClient : IDisposable
     /// </summary>
     public async Task<(int Status, string Body)> GetRawAsync(
         string path, IEnumerable<KeyValuePair<string, string>>? extra = null,
-        CancellationToken ct = default)
+        bool useWebSign = false, string? referer = null, CancellationToken ct = default)
     {
         var session = await EnsureSessionAsync(ct: ct);
 
@@ -1395,10 +1395,26 @@ public sealed class DouyinClient : IDisposable
         query += $"&a_bogus={UrlCodec.Quote(abogus)}" +
                  $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
 
-        string url = "https://www.douyin.com" + path + "?" + query;
+        // 搜索这类接口在 secsdk 的 webSign 策略表里，不签就回「请先登录」(2483)
+        string url = useWebSign
+            ? WebSign.SignUrl("https://www.douyin.com" + path, query, session.EffectiveUifid)
+            : "https://www.douyin.com" + path + "?" + query;
+
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
         AddSecsdkHeaders(req);      // 有些接口（如 profile/self）认这个
+
+        // 搜索这类接口会校验 Referer 是不是搜索页
+        if (!string.IsNullOrEmpty(referer))
+        {
+            req.Headers.Remove("Referer");
+            req.Headers.TryAddWithoutValidation("Referer", referer);
+        }
+
+        // 搜索还要 x-tt-token（值就是 Cookie 里的 x_tt_token）
+        string ttToken = CookieValue(session.LoginCookies, "x_tt_token");
+        if (ttToken.Length > 0)
+            req.Headers.TryAddWithoutValidation("x-tt-token", ttToken);
 
         using var resp = await _http.SendAsync(req, ct);
         string body = await resp.Content.ReadAsStringAsync(ct);

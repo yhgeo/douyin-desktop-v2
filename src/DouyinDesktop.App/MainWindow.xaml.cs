@@ -681,7 +681,10 @@ public partial class MainWindow : Window
                 const int Target = 10;
                 const int MaxRounds = 6;
 
-                var rule = CurrentTagRule;
+                // **暂不在推荐流里过滤**（2026-10-25 用户决定）。
+                // 实测：推荐流内容与兴趣脱节时（冷启动/降级），过滤会把整页筛空，
+                // 比"看到几条不想要的"体验更差。标签分组保留，将来给搜索模式用。
+                var rule = new TagRule();
                 var seen = new HashSet<string>(_presented, StringComparer.Ordinal);
                 int added = 0;
                 int rounds = 0;
