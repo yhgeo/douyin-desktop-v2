@@ -75,7 +75,8 @@ public sealed class Author
 
 public sealed class Statistics
 {
-    [JsonPropertyName("digg_count")] public long DiggCount { get; init; }    [JsonPropertyName("comment_count")] public long CommentCount { get; init; }
+    [JsonPropertyName("digg_count")] public long DiggCount { get; init; }
+    [JsonPropertyName("comment_count")] public long CommentCount { get; init; }
     [JsonPropertyName("share_count")] public long ShareCount { get; init; }
     [JsonPropertyName("collect_count")] public long CollectCount { get; init; }
     [JsonPropertyName("play_count")] public long PlayCount { get; init; }

@@ -413,13 +413,25 @@ public sealed class VideoStreamProxy : IAsyncDisposable
 
     private void TrimEntries()
     {
-        if (_entries.Count <= MaxEntries) return;
+        int excess = _entries.Count - MaxEntries;
+        if (excess <= 0) return;
 
-        foreach (var kv in _entries
-                     .OrderBy(x => x.Value.LastUsed)
-                     .Take(_entries.Count - MaxEntries))
+        // 先淘汰没有预取到数据的条目（只占位、不占内存）
+        foreach (var kv in _entries.OrderBy(x => x.Value.LastUsed))
         {
-            if (kv.Value.HeadLength == 0) _entries.TryRemove(kv.Key, out _);
+            if (excess <= 0) return;
+            if (kv.Value.HeadLength != 0) continue;
+            if (_entries.TryRemove(kv.Key, out _)) excess--;
+        }
+
+        // 还不够就按最久未用继续淘汰。
+        // 每条开头段约 1MB，只删空条目的话，用户刷几百条就会攒下几百 MB。
+        // 正在播的那条即使被移除也没关系：播放流已经持有 entry 引用，
+        // 下次请求会从磁盘缓存重新装回来。
+        foreach (var kv in _entries.OrderBy(x => x.Value.LastUsed))
+        {
+            if (excess <= 0) return;
+            if (_entries.TryRemove(kv.Key, out _)) excess--;
         }
     }
 

@@ -86,9 +86,19 @@ public sealed class KeyMap
     /// <summary>这个按键对应哪个动作（主键或别名）。</summary>
     public string? ActionFor(Key key)
     {
+        if (key == Key.None) return null;
+
+        // 第一轮只看用户绑定的主键。
+        // 自定义必须优先于内置别名——否则把「点赞」改成 W 之后，
+        // W 会先被排在数组前面的「上一条」别名吃掉，用户改的键永远不生效。
         foreach (var a in Actions)
         {
             if (Get(a.Id) == key) return a.Id;
+        }
+
+        // 第二轮才轮到别名（WASD / PageUp / PageDown 这些固定别名）
+        foreach (var a in Actions)
+        {
             if (a.Aliases.Contains(key)) return a.Id;
         }
         return null;

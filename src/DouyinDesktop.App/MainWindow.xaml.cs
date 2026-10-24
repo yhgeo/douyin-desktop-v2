@@ -70,6 +70,7 @@ public partial class MainWindow : Window
     /// <summary>当前列表是不是某个作者的作品（此时不再自动补推荐流，否则会混在一起）。</summary>
     private bool _authorMode;
     private bool _muted;
+    /// <summary>启动时传给 mpv 的音量。目前没有音量 UI，固定 100（系统音量自己调）。</summary>
     private int _volume = 100;
 
     // ================= 弹幕 =================
@@ -83,7 +84,6 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, DanmakuItem> _danmakuItems = new();
 
     private readonly Stopwatch _switchTimer = new();
-    private readonly List<string> _statusLines = new();
     private CancellationTokenSource? _prefetchCts;
     private int _consecutiveFailures;
     private bool _lastFromCache;
@@ -546,7 +546,11 @@ public partial class MainWindow : Window
                 // 而且**必须登录**（游客态 data 是空的）
                 if (_client.Session?.IsLoggedIn != true)
                 {
+                    // 状态要一起回退：只把 _followMode 置 false 的话，
+                    // _feed 还指着关注流、标签还写着「关注」，后续切换会错乱。
                     _followMode = false;
+                    _feed = _recommendFeed;
+                    UpdateModeLabel();
                     SetStatus("关注页需要先登录：设置 → 账号 → 扫码登录");
                     return;
                 }
@@ -587,7 +591,7 @@ public partial class MainWindow : Window
                 got = await FetchImagesOnlyAsync();
                 if (got.Count == 0)
                 {
-                    SetStatus("拉了几次都没找到图集，稍后再试（图集只占约 5%）");
+                    SetStatus("推荐流里没找到图集（实测连续 80 条都是视频）。看图集请按 Tab 切到「主页」");
                     return;
                 }
             }
@@ -635,8 +639,10 @@ public partial class MainWindow : Window
     /// <summary>
     /// 只看图集：循环拉推荐流，把视频丢掉，只留图集。
     ///
-    /// 代价要说清楚：图集在推荐流里约占 5%，凑 8 条要拉 160 条数据（约 8 次请求）。
-    /// 所以这里硬性限制最多 6 次，拉不到就返回空，不会无限请求。
+    /// ⚠️ 2026-10-25 实测：两个推荐接口合计 80 条里图集为 0，
+    /// 所以这条路目前基本拉不到东西。保留是因为接口随时可能变回来。
+    /// 图集的可靠入口是作者主页（aweme/post）。
+    /// 仍然硬性限制最多 6 次，拉不到就返回空，不会无限请求。
     /// </summary>
     private async Task<IReadOnlyList<Aweme>> FetchImagesOnlyAsync()
     {
@@ -1124,7 +1130,7 @@ public partial class MainWindow : Window
         bool liked = _liked.Contains(item.Id);
         long n = item.Statistics?.DiggCount ?? 0;
         if (liked) n++;     // 自己点的那一下算进去，数字才有反馈
-        LikeText.Text = $"{(liked ? "♥" : "♡")} {Count(n)}";
+        LikeText.Text = $"{(liked ? "♥" : "♡")} {Aweme.FormatCount(n)}";
         LikeText.Foreground = liked
             ? new SolidColorBrush(Color.FromRgb(0xFE, 0x2C, 0x55))
             : (Brush)FindResource("TextBrush");
@@ -1496,41 +1502,51 @@ public partial class MainWindow : Window
 
     private async Task<byte[]> GetImageBytesAsync(ImageInfo info)
     {
-        var urls = info.UrlList ?? new List<string>();
-        foreach (string url in urls)
+        foreach (string url in info.UrlList ?? new List<string>())
         {
             if (string.IsNullOrEmpty(url)) continue;
-            if (_imageCache.TryGetValue(url, out var cached)) return cached;
 
-            try
-            {
-                // 调试用的本地图集（--demo-image）走文件读取，其余走 HTTP
-                if (url.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
-                {
-                    string local = new Uri(url).LocalPath;
-                    if (!File.Exists(local)) continue;
-                    byte[] localBytes = await File.ReadAllBytesAsync(local);
-                    _imageCache[url] = localBytes;
-                    return localBytes;
-                }
-
-                using var req = new HttpRequestMessage(HttpMethod.Get, url);
-                using var resp = await _imageHttp.SendAsync(req);
-                if (!resp.IsSuccessStatusCode) continue;
-
-                byte[] bytes = await resp.Content.ReadAsByteArrayAsync();
-                if (bytes.Length == 0) continue;
-
-                if (_imageCache.Count > 60) _imageCache.Clear();
-                _imageCache[url] = bytes;
-                return bytes;
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
-            {
-                // 这个 CDN 不行就试下一个地址
-            }
+            // 一个 CDN 地址不行就试下一个
+            byte[]? bytes = await GetBytesAsync(url);
+            if (bytes is not null) return bytes;
         }
         throw new InvalidOperationException("所有图片地址都不可用");
+    }
+
+    /// <summary>下载并缓存一张图（封面 / 图集 / 取色都走这里）。</summary>
+    private async Task<byte[]?> GetBytesAsync(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return null;
+        if (_imageCache.TryGetValue(url, out var cached)) return cached;
+
+        try
+        {
+            byte[] bytes;
+
+            // 调试用的本地图集（--demo-image）走文件读取，其余走 HTTP
+            if (url.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+            {
+                string local = new Uri(url).LocalPath;
+                if (!File.Exists(local)) return null;
+                bytes = await File.ReadAllBytesAsync(local);
+            }
+            else
+            {
+                using var resp = await _imageHttp.GetAsync(url);
+                if (!resp.IsSuccessStatusCode) return null;
+                bytes = await resp.Content.ReadAsByteArrayAsync();
+            }
+
+            if (bytes.Length == 0) return null;
+
+            if (_imageCache.Count > 60) _imageCache.Clear();
+            _imageCache[url] = bytes;
+            return bytes;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+        {
+            return null;
+        }
     }
 
     private async Task StepImageAsync(int delta)
@@ -1610,6 +1626,15 @@ public partial class MainWindow : Window
         if (_index + 1 < _items.Count)
         {
             await PlayIndexAsync(_index + 1);
+            return;
+        }
+
+        // 作者主页模式：翻完就是最后一条。
+        // 这里**不能**走 LoadFeedAsync——那会往作者流里追加推荐内容，
+        // 之后看到的就不是"这个人的作品"了（曾经出现过这种混流）。
+        if (_authorMode)
+        {
+            SetStatus("已经是该作者的最后一条，按 Esc 回推荐");
             return;
         }
 
@@ -1805,8 +1830,6 @@ public partial class MainWindow : Window
 
         _lastHealthCheck = DateTime.Now;
 
-        _lastHealthCheck = DateTime.Now;
-
         // 快过期就先同步，省得等它真的失效
         if (!_browserSyncTried
             && SessionExpiry.IsNearExpiry(session.LoginCookies, TimeSpan.FromHours(12)))
@@ -1907,27 +1930,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<byte[]?> GetBytesAsync(string url)
-    {
-        if (string.IsNullOrEmpty(url)) return null;
-        if (_imageCache.TryGetValue(url, out var cached)) return cached;
-
-        try
-        {
-            using var resp = await _imageHttp.GetAsync(url);
-            if (!resp.IsSuccessStatusCode) return null;
-            byte[] bytes = await resp.Content.ReadAsByteArrayAsync();
-            if (bytes.Length == 0) return null;
-            if (_imageCache.Count > 60) _imageCache.Clear();
-            _imageCache[url] = bytes;
-            return bytes;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            return null;
-        }
-    }
-
     /// <summary>缩到 8px 取平均色。够代表整体色调，又不会被局部亮块带偏。</summary>
     private static Color AverageColor(byte[] bytes)
     {
@@ -1984,8 +1986,8 @@ public partial class MainWindow : Window
         // 详情接口带了 user_digged 就以此为准，没有就看本次运行里点过没
         if (item.UserDigged == 1) _liked.Add(item.Id);   // null 表示接口没给，按未点赞处理
         UpdateLikeVisual(item);
-        CommentText.Text = $"💬 {Count(st?.CommentCount ?? 0)}";
-        ShareText.Text = $"↗ {Count(st?.ShareCount ?? 0)}";
+        CommentText.Text = $"💬 {Aweme.FormatCount(st?.CommentCount ?? 0)}";
+        ShareText.Text = $"↗ {Aweme.FormatCount(st?.ShareCount ?? 0)}";
 
         MusicText.Text = item.Music is { Title.Length: > 0 }
             ? $"♪ {item.Music.Title} — {item.Music.Author}"
@@ -2056,7 +2058,9 @@ public partial class MainWindow : Window
     };
 
     private void UpdateIndexLabel()
-        => IndexLabel.Text = _items.Count == 0 ? "" : $"{_index + 1} / {_items.Count}";
+        => IndexLabel.Text = _index < 0 || _items.Count == 0
+            ? ""
+            : $"{_index + 1} / {_items.Count}";
 
     /// <summary>
     /// 按当前视频的宽高比，把画布摆到 VideoHost 里（留黑边）。
@@ -2096,13 +2100,8 @@ public partial class MainWindow : Window
         StatusText.Text = msg;
     }
 
-    /// <summary>技术日志：界面上只显示最后一条，完整记录写文件。</summary>
-    private void PushStatus(string msg)
-    {
-        _statusLines.Add(msg);
-        if (_statusLines.Count > 30) _statusLines.RemoveAt(0);
-        AppLog.Write(msg);
-    }
+    /// <summary>技术日志写文件。界面上那行状态由 SetStatus 单独管，这里不再攒一份。</summary>
+    private void PushStatus(string msg) => AppLog.Write(msg);
 
     // ================= 输入 =================
 
@@ -2279,10 +2278,7 @@ public partial class MainWindow : Window
             // WindowState=Maximized 只会铺到工作区，任务栏还露着。
             // 无边框窗口直接铺到整块屏幕，才是真的全屏。
             if (WindowState == WindowState.Maximized) WindowState = WindowState.Normal;
-            Left = 0;
-            Top = 0;
-            Width = SystemParameters.PrimaryScreenWidth;
-            Height = SystemParameters.PrimaryScreenHeight;
+            ApplyFullscreenBounds();
             Topmost = true;
         }
         else
@@ -2296,6 +2292,67 @@ public partial class MainWindow : Window
         }
 
         LayoutVideo();
+    }
+
+    private const uint MonitorDefaultToNearest = 2;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MonitorRect
+    {
+        public int Left, Top, Right, Bottom;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public int cbSize;
+        public MonitorRect rcMonitor;
+        public MonitorRect rcWork;
+        public uint dwFlags;
+    }
+
+    /// <summary>
+    /// 铺满**当前窗口所在那块屏幕**，而不是主屏。
+    ///
+    /// 原来固定用 SystemParameters.PrimaryScreen*：窗口拖到第二块屏幕后按 F，
+    /// 画面会跳回主屏铺满，副屏上留一块空窗口。
+    /// </summary>
+    private void ApplyFullscreenBounds()
+    {
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        IntPtr mon = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+        var mi = new MonitorInfo { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<MonitorInfo>() };
+
+        if (mon != IntPtr.Zero && GetMonitorInfo(mon, ref mi))
+        {
+            // rcMonitor 是物理像素，WPF 的 Left/Top/Width/Height 是 DIP，按当前 DPI 换算
+            var src = PresentationSource.FromVisual(this);
+            double sx = src?.CompositionTarget?.TransformFromDevice.M11 ?? 1.0;
+            double sy = src?.CompositionTarget?.TransformFromDevice.M22 ?? 1.0;
+
+            double w = (mi.rcMonitor.Right - mi.rcMonitor.Left) * sx;
+            double h = (mi.rcMonitor.Bottom - mi.rcMonitor.Top) * sy;
+            if (w > 1 && h > 1)
+            {
+                Left = mi.rcMonitor.Left * sx;
+                Top = mi.rcMonitor.Top * sy;
+                Width = w;
+                Height = h;
+                return;
+            }
+        }
+
+        // 拿不到显示器信息就退回主屏（保持老行为，至少能全屏）
+        Left = 0;
+        Top = 0;
+        Width = SystemParameters.PrimaryScreenWidth;
+        Height = SystemParameters.PrimaryScreenHeight;
     }
 
     // ================= 标题栏按钮 =================
@@ -2549,13 +2606,6 @@ public partial class MainWindow : Window
             ? $"{s / 3600}:{s % 3600 / 60:00}:{s % 60:00}"
             : $"{s / 60}:{s % 60:00}";
     }
-
-    private static string Count(long n) => n switch
-    {
-        >= 100_000_000 => (n / 100_000_000.0).ToString("0.#") + "亿",
-        >= 10_000 => (n / 10_000.0).ToString("0.#") + "万",
-        _ => n.ToString(),
-    };
 }
 
 /// <summary>找 mpv.exe：先看环境变量，再从程序目录往上找 assets/mpv。</summary>

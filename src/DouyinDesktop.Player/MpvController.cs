@@ -74,7 +74,6 @@ public sealed class MpvController : IAsyncDisposable
 {
     private readonly Process _process;
     private readonly MpvIpc _ipc;
-    private readonly string _pipeName;
     private bool _disposed;
 
     /// <summary>
@@ -113,11 +112,10 @@ public sealed class MpvController : IAsyncDisposable
     public double Position { get; private set; }
     public bool IsPaused { get; private set; }
 
-    private MpvController(Process process, MpvIpc ipc, string pipeName)
+    private MpvController(Process process, MpvIpc ipc)
     {
         _process = process;
         _ipc = ipc;
-        _pipeName = pipeName;
 
         _ipc.PropertyChanged += OnPropertyChanged;
         _ipc.EventReceived += OnEvent;
@@ -187,7 +185,7 @@ public sealed class MpvController : IAsyncDisposable
             throw;
         }
 
-        var controller = new MpvController(process, ipc, pipeName);
+        var controller = new MpvController(process, ipc);
         await controller.SubscribeAsync();
         return controller;
     }
@@ -301,9 +299,6 @@ public sealed class MpvController : IAsyncDisposable
         try { await _ipc.CommandAsync("stop"); }
         catch (Exception ex) { Log?.Invoke("stop 失败：" + ex.Message); }
     }
-
-    /// <summary>把 mpv 的绘制区域对齐到新的父窗口尺寸（嵌入模式下由父窗口拉伸，通常不用调）。</summary>
-    public Task ResizeAsync() => Task.CompletedTask;
 
     // ================= 事件 =================
 

@@ -189,7 +189,7 @@ public sealed class WebTestWindow : Window
                     if (string.IsNullOrEmpty(value)) { AppLog.Write($"[自检] 替换 {name}：没有值，跳过"); continue; }
 
                     string swapped = ReplaceParam(capturedUrl, name, value);
-                    string reSigned = ReSign(swapped);
+                    string? reSigned = ReSign(swapped);
                     if (reSigned is null) { AppLog.Write($"[自检] 替换 {name}：重签失败"); continue; }
 
                     using var rq = new HttpRequestMessage(HttpMethod.Get, reSigned);

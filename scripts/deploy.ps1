@@ -49,7 +49,12 @@ Write-Host '[2/3] 复制到安装目录…' -ForegroundColor Cyan
 $files = @('DouyinDesktop.exe', '使用说明.txt', 'diagnose.bat')
 foreach ($f in $files) {
     $src = Join-Path $out $f
-    if (-not (Test-Path $src)) { continue }
+    if (-not (Test-Path $src)) {
+        # 这两个文件不在源码里，是手工放进 dist\pkg 的。
+        # 静默跳过会让人以为更新了、实际安装目录还是旧的说明文档——所以要喊出来。
+        Write-Host ("      [!] 缺少 {0}：publish 输出里没有，安装目录这一项不会更新" -f $f) -ForegroundColor Yellow
+        continue
+    }
     Copy-Item $src (Join-Path $Target $f) -Force
     $size = [math]::Round((Get-Item $src).Length / 1MB, 1)
     Write-Host ("      {0}  {1} MB" -f $f, $size) -ForegroundColor DarkGray

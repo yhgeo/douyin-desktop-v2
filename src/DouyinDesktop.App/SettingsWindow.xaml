@@ -157,7 +157,7 @@
                                       Checked="OnImageOnlyChanged" Unchecked="OnImageOnlyChanged" />
                             <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,9,0,0"
                                        TextWrapping="Wrap" LineHeight="18"
-                                       Text="图集在推荐流里约占 5%，开启后会连续拉几次直到凑够（最多 6 次请求）。请求比较频繁，不建议反复按 R 刷新。" />
+                                       Text="⚠ 2026-10-25 实测：推荐流连续 80 条里图集为 0，这个开关目前大概率拉不到内容。要看图集请按 Tab 切到「主页」，从作者作品里找。" />
                         </StackPanel>
                     </Border>
 

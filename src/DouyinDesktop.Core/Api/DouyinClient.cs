@@ -103,6 +103,11 @@ public sealed class DouyinClient : IDisposable
             // 刷新凭据只该换 ttwid / msToken 这些游客材料，
             // **不能把登录态和设备标识弄丢**——之前这里直接新建会话，
             // 于是推荐流失败一次重试就变成游客流，评论/主页也开始返回空。
+            //
+            // 注意：对**已登录**的会话，这一步实际上把新注册的 ttwid/s_v_web_id
+            // 又换回了旧值（设备身份必须和 Cookie 一致，不能随机换）。
+            // 所以 forceRefresh 对登录用户的效果≈只递增了一次 refresh_index，
+            // 重试仍可能靠这个参数拿到不同的一批内容。
             if (previous is { IsLoggedIn: true })
             {
                 _session.LoginCookies = previous.LoginCookies;
@@ -327,6 +332,7 @@ public sealed class DouyinClient : IDisposable
             using var resp = await _http.SendAsync(req, ct);
             string body = await resp.Content.ReadAsStringAsync(ct);
             sw.Stop();
+            PickUpTokens(resp, session);
 
             if (!resp.IsSuccessStatusCode)
                 return FeedResult.Fail($"HTTP {(int)resp.StatusCode}", sw.ElapsedMilliseconds);
@@ -435,6 +441,7 @@ public sealed class DouyinClient : IDisposable
             using var resp = await _http.SendAsync(req, ct);
             string body = await resp.Content.ReadAsStringAsync(ct);
             sw.Stop();
+            PickUpTokens(resp, session);
 
             if (!resp.IsSuccessStatusCode)
                 return FeedResult.Fail($"HTTP {(int)resp.StatusCode}", sw.ElapsedMilliseconds);
@@ -472,10 +479,6 @@ public sealed class DouyinClient : IDisposable
 
     // ================= 评论 =================
 
-    /// <summary>
-    /// 拉一级评论。cursor 传上一页返回的 Cursor，首页传 0。
-    /// 登录态下成功率更高（游客态经常只给一部分）。
-    /// </summary>
     /// <summary>
     /// 视频弹幕。路径是抓包确认的（网页播放器真实请求）：
     ///   /aweme/v1/web/danmaku/get_v2/   取弹幕
@@ -609,6 +612,7 @@ public sealed class DouyinClient : IDisposable
 
         int cut = query.IndexOf("&a_bogus=", StringComparison.Ordinal);
         if (cut >= 0) query = query[..cut];
+        else if (query.StartsWith("a_bogus=", StringComparison.Ordinal)) query = "";
 
         if (!string.IsNullOrEmpty(awemeId)) query = SetParam(query, "aweme_id", awemeId);
         if (!string.IsNullOrEmpty(overrideParam) && overrideValue is not null)
@@ -847,6 +851,7 @@ public sealed class DouyinClient : IDisposable
             // 模板本身参数是稳定的，留着更划算。
 
             // 空 body 时把状态码和关键响应头打出来——服务端拒绝的原因通常在这里
+            bool emptyBody = body.Length == 0;
             if (page.Comments.Count == 0)
             {
                 var hs = resp.Headers
@@ -858,8 +863,10 @@ public sealed class DouyinClient : IDisposable
                 Log?.Invoke($"评论空响应 HTTP {(int)resp.StatusCode}，长度 {body.Length}，头：{string.Join(" | ", hs)}");
             }
 
-            // 登录着却拿到空 → 多半是登录态过期了，让界面明确提示
-            if (page.Comments.Count == 0) ReportLoginExpired();
+            // 只有**空 body**才是登录态失效的信号。
+            // 作品本来没有评论时，服务端会返回一个正常的 JSON（comments 为空数组），
+            // 那种情况报"登录失效"是误报——零评论的作品很常见。
+            if (emptyBody) ReportLoginExpired();
 
             Log?.Invoke("[评论URL] " + url);
 
@@ -1144,7 +1151,6 @@ public sealed class DouyinClient : IDisposable
     public async Task<Aweme?> GetAwemeDetailAsync(string awemeId, CancellationToken ct = default)
     {
         var session = await EnsureSessionAsync(ct: ct);
-        string bv = _profile.BrowserVersion;
 
         var ps = new List<KeyValuePair<string, string>>
         {
@@ -1186,7 +1192,8 @@ public sealed class DouyinClient : IDisposable
             if (!doc.RootElement.TryGetProperty("aweme_detail", out var d)
                 || d.ValueKind != JsonValueKind.Object)
             {
-                Log?.Invoke("详情里没有 aweme_detail");                return null;
+                Log?.Invoke("详情里没有 aweme_detail");
+                return null;
             }
 
             var item = d.Deserialize<Aweme>(JsonOptions);
@@ -1245,7 +1252,8 @@ public sealed class DouyinClient : IDisposable
     /// 高风控接口要的 x-tt-session-dtrait 头。缺了会被静默丢弃
     /// （点赞返回 status_code=0 但没生效、评论/详情返回空 body）。
     /// </summary>
-    private void AddBrowserHeaders(HttpRequestMessage req, DouyinSession session)    {
+    private void AddBrowserHeaders(HttpRequestMessage req, DouyinSession session)
+    {
         req.Headers.TryAddWithoutValidation("User-Agent", _profile.UserAgent);
         req.Headers.TryAddWithoutValidation("Referer", "https://www.douyin.com/");
         req.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");

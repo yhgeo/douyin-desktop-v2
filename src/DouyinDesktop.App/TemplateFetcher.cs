@@ -14,11 +14,16 @@ namespace DouyinDesktop.App;
 /// </summary>
 public static class TemplateFetcher
 {
-    /// <summary>需要抓的接口路径。</summary>
+    /// <summary>
+    /// 需要抓的接口路径。
+    ///
+    /// **只有评论走模板。** 作者作品（aweme/post）不用模板——视频页根本不会
+    /// 发那条请求，模板抓不到，列在这里只会让每次抓取都白等到超时
+    /// （这就是"打开主页卡很久"的来源）。
+    /// </summary>
     public static readonly string[] Paths =
     {
         "/aweme/v1/web/comment/list/",
-        "/aweme/v1/web/aweme/post/",
     };
 
     public static async Task<bool> CaptureAsync(string awemeId, int timeoutSeconds = 8)
@@ -32,7 +37,6 @@ public static class TemplateFetcher
             if (!Directory.Exists(dir)) return false;
 
             var found = new Dictionary<string, string>();
-            string pending = "";
 
             host = new Window
             {

@@ -265,6 +265,11 @@ if (args.Length > 0 && args[0] == "comment")
     using var cc = DouyinClient.Create();
     cc.Log += m => Console.WriteLine("    " + m);
 
+    // 必须和主程序一样挂上接口模板。
+    // 不挂的话走的是"自己拼参数"的老路，实测大概率空 body，
+    // 会让人误以为登录态失效了（实际只是模板没生效）。
+    AttachTemplates(cc);
+
     var f = await cc.GetFeedAsync(5);
     if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
 
@@ -481,8 +486,9 @@ if (args.Length > 0 && args[0] == "scroll")
     return 0;
 }
 
-// 详情接口（IP 属地）：dotnet run --project src/DouyinDesktop.Probe -- detail
-if (args.Length > 0 && args[0] == "detail")
+// 详情接口（IP 属地）：dotnet run --project src/DouyinDesktop.Probe -- iplabel
+// 注意：命令名不能再用 detail——上面已经有一个 detail 分支且先 return 了。
+if (args.Length > 0 && args[0] == "iplabel")
 {
     using var cd = DouyinClient.Create();
     cd.Log += m => Console.WriteLine("    " + m);
@@ -568,3 +574,31 @@ return probe.Ok ? 0 : 1;
 
 static string Short(string s, int max)
     => string.IsNullOrEmpty(s) ? "(无文案)" : s.Length <= max ? s : s[..max] + "…";
+
+/// <summary>把 data/api-templates.json 挂到客户端上，和主程序的行为保持一致。</summary>
+static void AttachTemplates(DouyinClient client)
+{
+    try
+    {
+        string path = Path.Combine(DouyinPaths.DataDirectory, "api-templates.json");
+        if (!File.Exists(path))
+        {
+            Console.WriteLine("TPL=none  DIR=" + DouyinPaths.DataDirectory);
+            return;
+        }
+
+        var map = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path));
+        if (map is null || map.Count == 0)
+        {
+            Console.WriteLine("TPL=empty");
+            return;
+        }
+
+        client.GetTemplate = p => map.TryGetValue(p, out var u) ? u : null;
+        Console.WriteLine("TPL=" + string.Join(",", map.Keys));
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("TPL 读取失败：" + ex.Message);
+    }
+}
