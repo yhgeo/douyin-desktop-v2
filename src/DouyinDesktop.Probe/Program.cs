@@ -442,6 +442,95 @@ if (args.Length > 0 && args[0] == "user")
     return 0;
 }
 
+// presented_ids 累积会不会把推荐拖向"大众"
+// dotnet run --project src/DouyinDesktop.Probe -- feedpres
+if (args.Length > 0 && args[0] == "feedpres")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    Console.WriteLine("=== A. 不传 presented_ids（每次全新）===");
+    for (int i = 1; i <= 4; i++)
+    {
+        var r = await c.GetFeedAsync(10);
+        if (r.Success)
+            Console.WriteLine($"  {i}: {string.Join("、", r.Items.Take(6).Select(x => x.AuthorName))}");
+        await Task.Delay(1400);
+    }
+
+    Console.WriteLine("\n=== B. 累积 presented_ids（模拟主程序翻页）===");
+    var seen = new HashSet<string>(StringComparer.Ordinal);
+    for (int i = 1; i <= 4; i++)
+    {
+        var r = await c.GetFeedAsync(10, seen);
+        if (!r.Success) { Console.WriteLine($"  {i}: 失败 {r.Message}"); continue; }
+
+        foreach (var a in r.Items) seen.Add(a.Id);
+        Console.WriteLine($"  {i}: [{seen.Count} 个已展示] {string.Join("、", r.Items.Take(6).Select(x => x.AuthorName))}");
+        await Task.Delay(1400);
+    }
+    return 0;
+}
+
+// 两个推荐接口各自连续拉，看谁会退化成"同一批大众视频"
+// dotnet run --project src/DouyinDesktop.Probe -- feedmix
+if (args.Length > 0 && args[0] == "feedmix")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var sets = new Dictionary<string, List<HashSet<string>>>();
+
+    async Task Run(string label, bool scroll)
+    {
+        Console.WriteLine($"\n===== {label} =====");
+        var rounds = new List<HashSet<string>>();
+
+        for (int i = 1; i <= 5; i++)
+        {
+            var r = scroll
+                ? await c.GetFeedScrollAsync(10, i)
+                : await c.GetFeedAsync(10);
+
+            if (!r.Success) { Console.WriteLine($"  第{i}轮 失败：{r.Message}"); continue; }
+
+            var ids = r.Items.Select(x => x.Id).ToHashSet();
+            rounds.Add(ids);
+
+            string names = string.Join("、", r.Items.Take(6).Select(x => x.AuthorName));
+            Console.WriteLine($"  第{i}轮 {r.Items.Count,2} 条：{names}");
+            await Task.Delay(1500);
+        }
+
+        // 相邻两轮的重合度 —— 越接近 100% 越说明"每次给同一批"
+        for (int i = 1; i < rounds.Count; i++)
+        {
+            int overlap = rounds[i].Intersect(rounds[i - 1]).Count();
+            Console.WriteLine($"  第{i}→{i + 1}轮 重合 {overlap}/{rounds[i].Count}");
+        }
+
+        sets[label] = rounds;
+    }
+
+    await Run("module/feed（GetFeedAsync）", scroll: false);
+    await Run("tab/feed（GetFeedScrollAsync）", scroll: true);
+
+    // 两个接口之间的重合度
+    if (sets.Count == 2)
+    {
+        var a = sets["module/feed（GetFeedAsync）"];
+        var b = sets["tab/feed（GetFeedScrollAsync）"];
+        if (a.Count > 0 && b.Count > 0)
+        {
+            int overlap = a[^1].Intersect(b[^1]).Count();
+            Console.WriteLine($"\n最后两轮跨接口重合：{overlap} 条");
+        }
+    }
+    return 0;
+}
+
 // 搜索接口试探：dotnet run --project src/DouyinDesktop.Probe -- search 美女
 if (args.Length > 0 && args[0] == "search")
 {
