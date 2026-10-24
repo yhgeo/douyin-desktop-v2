@@ -1,6 +1,4 @@
-using System.Text.RegularExpressions;
-
-namespace DouyinDesktop.App;
+namespace DouyinDesktop.Core;
 
 /// <summary>
 /// 从 Cookie 里算出登录凭据的到期时间。
