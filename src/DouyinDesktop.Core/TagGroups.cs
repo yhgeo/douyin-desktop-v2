@@ -69,9 +69,10 @@ public sealed class TagGroups
         {
             string body = bodies[name].ToString().Trim();
 
-            // 空组直接丢掉：建了组还没填规则时不该出现在切换列表里，
-            // 否则按快捷键会切到一个"什么都不显示"的空档。
-            if (body.Length == 0) continue;
+            // 只有"隐式的默认组"为空时才跳过（纯空文本不该造出一个组）。
+            // **显式写了 [组名] 的组，即使规则为空也要保留** —— 否则用户新建的空分组
+            // 一保存就消失，看起来像"分组被吞了"。
+            if (name == DefaultName && body.Length == 0) continue;
 
             groups.Items.Add(new Group(name, body));
         }

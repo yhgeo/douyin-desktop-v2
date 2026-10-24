@@ -86,11 +86,21 @@ public class TagGroupsTests
     }
 
     [Fact]
-    public void 空组会被忽略()
+    public void 显式声明的空组要保留()
     {
-        // 只有一个空的 [X]，应该什么都不剩
+        // 用户新建了分组还没填规则 —— 存盘再读回来必须还在，
+        // 否则看起来像"分组被吞了"（2026-10-25 的 bug）
         var g = TagGroups.Parse("[X]\n\n");
-        Assert.True(g.IsEmpty);
+        Assert.Single(g.Items);
+        Assert.Equal("X", g.Items[0].Name);
+        Assert.Equal("", g.Items[0].Rules);
+    }
+
+    [Fact]
+    public void 纯空文本不会造出默认组()
+    {
+        Assert.True(TagGroups.Parse("").IsEmpty);
+        Assert.True(TagGroups.Parse("\n\n  \n").IsEmpty);
     }
 
     [Fact]

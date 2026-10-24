@@ -671,26 +671,30 @@ public partial class MainWindow : Window
             {
                 // 标签过滤会让一批剩不下几条，所以**循环拉到够 10 条**（最多 6 轮）。
                 //
-                // 每轮 10 条信息、最多 60 条；拉的是 JSON（地址/标签/统计），
-                // **不下载视频**——视频只在播放和预取时才拉。
+                // 关键：**每轮拉完立刻并入列表并开始播**，不等凑满 10 条——
+                // 否则过滤很严时要干等 6 轮（十几秒）才出画面。
+                // 拉的是 JSON（地址/标签/统计），**不下载视频**。
                 const int Target = 10;
                 const int MaxRounds = 6;
 
                 var rule = CurrentTagRule;
-                var collected = new List<Aweme>();
                 var seen = new HashSet<string>(_presented, StringComparer.Ordinal);
+                int added = 0;
+                int rounds = 0;
+                bool started = false;
 
-                for (int round = 0; round < MaxRounds && collected.Count < Target; round++)
+                for (int round = 0; round < MaxRounds && added < Target; round++)
                 {
                     // 两个推荐接口交替用：内容池不同，混着拉能增加多样性
                     var result = _useScrollFeed
                         ? await _client.GetFeedScrollAsync(_settings.FeedBatchSize, _refreshIndex++)
                         : await _client.GetFeedAsync(_settings.FeedBatchSize, seen);
                     _useScrollFeed = !_useScrollFeed;
+                    rounds++;
 
                     if (!result.Success)
                     {
-                        if (collected.Count == 0) { SetStatus("获取失败：" + result.Message); return; }
+                        if (added == 0) { SetStatus("获取失败：" + result.Message); return; }
                         break;
                     }
 
@@ -700,14 +704,35 @@ public partial class MainWindow : Window
                         ? (IReadOnlyList<Aweme>)result.Items
                         : result.Items.Where(rule.Allows).ToList();
 
-                    collected.AddRange(kept);
-                    foreach (var a in kept) seen.Add(a.Id);
+                    int before = _items.Count;
+                    foreach (var a in kept)
+                    {
+                        if (!_presented.Add(a.Id)) continue;
+                        _items.Add(a);
+                        seen.Add(a.Id);
+                    }
+                    added += _items.Count - before;
+
+                    // 第一轮只要有内容就先播上，后面的轮次在后台继续补
+                    if (!started && _items.Count > 0)
+                    {
+                        started = true;
+                        await PlayIndexAsync(0);
+                    }
 
                     if (result.Items.Count == 0) break;   // 服务端没有更多了
                     if (rule.IsEmpty) break;              // 不过滤，一批就够
                 }
 
-                got = collected;
+                if (added == 0 && !rule.IsEmpty)
+                {
+                    SetStatus("标签过滤太严，这批没剩下内容 —— 去 设置 → 播放 放宽规则");
+                    return;
+                }
+
+                PushStatus($"推荐流 +{added} 条 / {elapsed}ms（{rounds} 轮）");
+                UpdateIndexLabel();
+                return;      // 已经并入列表了，不用再走下面统一的处理
             }
 
             // 标签过滤：用户配了"只看/屏蔽"就在这里筛掉。
