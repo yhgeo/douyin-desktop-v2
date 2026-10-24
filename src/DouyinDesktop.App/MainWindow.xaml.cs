@@ -681,7 +681,11 @@ public partial class MainWindow : Window
                 var seen = new HashSet<string>(_presented, StringComparer.Ordinal);
                 int added = 0;
                 int rounds = 0;
+                int scanned = 0;
                 bool started = false;
+
+                // 过滤全空时要能说清"扫到了什么"，否则用户只会看到"没剩下内容"
+                var tagHits = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
                 for (int round = 0; round < MaxRounds && added < Target; round++)
                 {
@@ -699,6 +703,11 @@ public partial class MainWindow : Window
                     }
 
                     elapsed += result.ElapsedMs;
+
+                    scanned += result.Items.Count;
+                    foreach (var a in result.Items)
+                        foreach (string t in a.Hashtags)
+                            tagHits[t] = tagHits.GetValueOrDefault(t) + 1;
 
                     var kept = rule.IsEmpty
                         ? (IReadOnlyList<Aweme>)result.Items
@@ -730,7 +739,16 @@ public partial class MainWindow : Window
 
                 if (added == 0 && !rule.IsEmpty)
                 {
-                    SetStatus("标签过滤太严，这批没剩下内容 —— 去 设置 → 播放 放宽规则");
+                    // 说清楚扫了多少、流里都是什么标签 —— 用户才知道该填什么
+                    string top = string.Join("、", tagHits
+                        .OrderByDescending(x => x.Value)
+                        .Take(6)
+                        .Select(x => x.Key));
+
+                    AppLog.Write($"[标签] 扫 {scanned} 条无命中，热门标签：{top}");
+                    SetStatus(top.Length > 0
+                        ? $"扫了 {scanned} 条没命中「{CurrentTagGroups.Describe(_settings.ActiveTagGroup)}」· 当前流热门：{top}"
+                        : $"扫了 {scanned} 条，一条带标签的都没有 —— 先关掉过滤养几天推荐");
                     return;
                 }
 

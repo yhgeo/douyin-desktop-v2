@@ -28,6 +28,21 @@ public static class TemplateFetcher
 
     public static async Task<bool> CaptureAsync(string awemeId, int timeoutSeconds = 8)
     {
+        // WebView2 和 Window 必须在 UI（STA）线程上创建。
+        // 调用方可能是后台线程——评论重试、健康检查、模板自愈都会走到这里，
+        // 直接 new Window() 会抛「调用线程必须为 STA」（2026-10-25 日志里 5 次）。
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            Task<bool> inner = await dispatcher.InvokeAsync(() => CaptureAsync(awemeId, timeoutSeconds));
+            return await inner;
+        }
+
+        return await CaptureCoreAsync(awemeId, timeoutSeconds);
+    }
+
+    private static async Task<bool> CaptureCoreAsync(string awemeId, int timeoutSeconds)
+    {
         Window? host = null;
         WebView2? web = null;
 
