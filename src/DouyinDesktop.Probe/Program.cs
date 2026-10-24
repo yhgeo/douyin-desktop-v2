@@ -215,6 +215,62 @@ if (args.Length > 0 && args[0] == "diggtest")
     return 0;
 }
 
+// 点赞端到端：真实点赞一条 → 回读 → 取消 → 回读（净效果为零）
+// dotnet run --project src/DouyinDesktop.Probe -- diggsync
+if (args.Length > 0 && args[0] == "diggsync")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    // 有抓到的 secsdk 头就带上（浏览器真实值），和主程序一致
+    string secPath = Path.Combine(DouyinPaths.DataDirectory, "secsdk-headers.json");
+    if (File.Exists(secPath))
+    {
+        var map = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(secPath));
+        if (map is not null) { c.GetExtraHeaders = () => map; Console.WriteLine($"secsdk 头: {string.Join(",", map.Keys)}"); }
+    }
+    else Console.WriteLine("secsdk 头: 没有（用 Cookie 里的 csrf 兜底）");
+
+    var f = await c.GetFeedAsync(10);
+    if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
+
+    var target = f.Items.FirstOrDefault(x => x.UserDigged == 0);
+    if (target is null) { Console.WriteLine("这批里没有未点赞的作品"); return 1; }
+
+    Console.WriteLine($"目标 {target.Id}  @{target.AuthorName}  点赞数 {target.Statistics?.DiggCount}");
+
+    async Task Sample(string tag)
+    {
+        for (int i = 1; i <= 3; i++)
+        {
+            await Task.Delay(1500);
+            var d = await c.GetAwemeDetailAsync(target.Id);
+            Console.WriteLine($"    {tag} +{i * 1.5:0.0}s  user_digged={d?.UserDigged}  count={d?.Statistics?.DiggCount}");
+        }
+    }
+
+    Console.WriteLine("\n[0] 基线");
+    var baseD = await c.GetAwemeDetailAsync(target.Id);
+    Console.WriteLine($"    user_digged={baseD?.UserDigged}  count={baseD?.Statistics?.DiggCount}");
+
+    Console.WriteLine("\n[1] 点赞");
+    Console.WriteLine($"    请求返回 {await c.DiggAsync(target.Id, true)}");
+    await Sample("赞后");
+
+    Console.WriteLine("\n[2] 取消");
+    Console.WriteLine($"    请求返回 {await c.DiggAsync(target.Id, false)}");
+    await Sample("取消后");
+
+    Console.WriteLine("\n[3] 重新拉一批，看列表里的状态");
+    var f2 = await c.GetFeedAsync(10);
+    var again = f2.Items.FirstOrDefault(x => x.Id == target.Id);
+    Console.WriteLine(again is null
+        ? "    （这条不在新一批里，无法对比）"
+        : $"    列表 user_digged={again.UserDigged}");
+    return 0;
+}
+
 // 弹幕接口试探：dotnet run --project src/DouyinDesktop.Probe -- danmaku
 // 路径是抓包确认的，参数还在猜——先看返回什么
 if (args.Length > 0 && args[0] == "danmaku")
@@ -383,6 +439,37 @@ if (args.Length > 0 && args[0] == "user")
     }
 
     Console.WriteLine($"\n合计图集 {totalImages} 条");
+    return 0;
+}
+
+// 点赞状态来源调查：dotnet run --project src/DouyinDesktop.Probe -- diggstate
+// 回答一个问题：推荐流本身给不给 user_digged？不给的话只能逐条查详情。
+if (args.Length > 0 && args[0] == "diggstate")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var f = await c.GetFeedAsync(10);
+    if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
+
+    Console.WriteLine("\n推荐流里的 user_digged：");
+    int given = 0;
+    foreach (var a in f.Items)
+    {
+        string v = a.UserDigged is null ? "null（接口没给）" : a.UserDigged.ToString()!;
+        if (a.UserDigged is not null) given++;
+        Console.WriteLine($"  {a.Id}  {v}");
+    }
+    Console.WriteLine($"→ {given}/{f.Items.Count} 条带了点赞状态");
+
+    Console.WriteLine("\n逐条查详情对比（前 3 条）：");
+    foreach (var a in f.Items.Take(3))
+    {
+        var d = await c.GetAwemeDetailAsync(a.Id);
+        Console.WriteLine($"  {a.Id}  列表={(a.UserDigged?.ToString() ?? "null")}  详情={(d?.UserDigged?.ToString() ?? "null")}");
+        await Task.Delay(500);
+    }
     return 0;
 }
 

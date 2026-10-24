@@ -578,6 +578,14 @@ public sealed class DouyinClient : IDisposable
     /// <summary>模板缺失时去抓一次（参数是作品 id），返回是否抓到。</summary>
     public Func<string, Task<bool>>? CaptureTemplate { get; set; }
 
+    /// <summary>
+    /// 额外请求头（secsdk 的 `x-tt-session-dtrait` 之类），由 App 层注入。
+    ///
+    /// 这个头是 secsdk 在浏览器里运行时生成的，Cookie 里推不出来。
+    /// 写接口（点赞）缺了它服务端会**静默丢弃**——返回 status_code=0 但状态不变。
+    /// </summary>
+    public Func<IReadOnlyDictionary<string, string>?>? GetExtraHeaders { get; set; }
+
     /// <summary>上次尝试抓模板的时间（失败后冷却 5 分钟，避免每次都卡界面）。</summary>
     private DateTime _lastCaptureAttempt = DateTime.MinValue;
 
@@ -721,14 +729,28 @@ public sealed class DouyinClient : IDisposable
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         AddBrowserHeaders(req, session);
+        AddSecsdkHeaders(req);
         req.Headers.Remove("Referer");
         req.Headers.TryAddWithoutValidation("Referer", $"https://www.douyin.com/video/{awemeId}");
 
-        // 写操作（点赞/关注/评论）必须带 CSRF 头，值就是 Cookie 里的 passport_csrf_token。
-        // 少了它服务端一律回 status_code=8「用户未登录」，很容易误判成没登录。
-        string csrf = CookieValue(session.LoginCookies, "passport_csrf_token");
-        if (csrf.Length > 0)
-            req.Headers.TryAddWithoutValidation("x-secsdk-csrf-token", csrf);
+        // 写操作（点赞/关注/评论）必须带 CSRF 头。
+        // 优先用**浏览器真实值**（AddSecsdkHeaders 从 secsdk-headers.json 注入的，
+        // 实测浏览器发的是 "DOWNGRADE" 而不是 Cookie 里那串 hex）；
+        // 没有抓到的值时才回退到 Cookie 里的 passport_csrf_token。
+        // 值不对时服务端照样回 status_code=0，但点赞不会真的生效——很难发现。
+        if (!req.Headers.Contains("x-secsdk-csrf-token"))
+        {
+            string csrf = CookieValue(session.LoginCookies, "passport_csrf_token");
+            if (csrf.Length > 0)
+                req.Headers.TryAddWithoutValidation("x-secsdk-csrf-token", csrf);
+        }
+
+        // 试过的、**没用**的补救（2026-10-25 实测，别再重复试）：
+        //   · 补 x-tt-token（值取 Cookie 的 x_tt_token）      → 仍然 user_digged=0
+        //   · 补 x-tt-session-dtrait                          → 浏览器根本不发这个头
+        //   · 把 csrf 换成浏览器真实值 DOWNGRADE               → 仍然 user_digged=0
+        // 读接口全部正常、写接口全部静默丢弃，最可能是 TLS 指纹（.NET 的 SChannel
+        // 与 Chrome 不同）。要绕过就得换 HTTP 栈，成本高，暂不做。
 
         try
         {
@@ -1277,8 +1299,9 @@ public sealed class DouyinClient : IDisposable
     // ================= 请求头 =================
 
     /// <summary>
-    /// 高风控接口要的 x-tt-session-dtrait 头。缺了会被静默丢弃
+    /// 浏览器常用头。高风控接口缺了关键的 secsdk 头会被**静默丢弃**
     /// （点赞返回 status_code=0 但没生效、评论/详情返回空 body）。
+    /// secsdk 头从 <see cref="GetExtraHeaders"/> 补。
     /// </summary>
     private void AddBrowserHeaders(HttpRequestMessage req, DouyinSession session)
     {
@@ -1295,6 +1318,22 @@ public sealed class DouyinClient : IDisposable
         req.Headers.TryAddWithoutValidation("sec-fetch-site", "same-origin");
         req.Headers.TryAddWithoutValidation("priority", "u=1, i");
         req.Headers.TryAddWithoutValidation("Cookie", session.CookieHeader);
+    }
+
+    /// <summary>
+    /// 给写接口补 secsdk 头（浏览器真实值）。
+    /// 只在点赞这类写操作上生效——读接口带上反而多一层变数。
+    /// </summary>
+    private void AddSecsdkHeaders(HttpRequestMessage req)
+    {
+        if (GetExtraHeaders?.Invoke() is not { Count: > 0 } extra) return;
+
+        foreach (var (name, value) in extra)
+        {
+            if (string.IsNullOrEmpty(value)) continue;
+            req.Headers.Remove(name);
+            req.Headers.TryAddWithoutValidation(name, value);
+        }
     }
 
     public void Dispose()

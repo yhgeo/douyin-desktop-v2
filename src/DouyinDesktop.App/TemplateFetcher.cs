@@ -37,6 +37,7 @@ public static class TemplateFetcher
             if (!Directory.Exists(dir)) return false;
 
             var found = new Dictionary<string, string>();
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             host = new Window
             {
@@ -63,6 +64,18 @@ public static class TemplateFetcher
             core.AddWebResourceRequestedFilter("*aweme/v1/web/*", CoreWebView2WebResourceContext.All);
             core.WebResourceRequested += (_, e) =>
             {
+                // 不管是不是我们要的 URL，先把 secsdk 头抄下来：
+                // 点赞这类写接口缺了 x-tt-session-dtrait 会被静默丢弃。
+                // 这个头在任何 secsdk 请求里都有，不用非得等到点赞那一条。
+                foreach (var h in e.Request.Headers)
+                {
+                    if (h.Key.StartsWith("x-tt-session", StringComparison.OrdinalIgnoreCase)
+                        || h.Key.StartsWith("x-secsdk", StringComparison.OrdinalIgnoreCase))
+                    {
+                        headers[h.Key] = h.Value;
+                    }
+                }
+
                 string uri = e.Request.Uri;
                 int q = uri.IndexOf('?');
                 if (q < 0) return;
@@ -85,6 +98,12 @@ public static class TemplateFetcher
             {
                 ApiTemplate.Save(path, url);
                 AppLog.Write($"[模板] 已保存 {path}（{url.Length} 字符）");
+            }
+
+            if (headers.Count > 0)
+            {
+                SecsdkHeaders.Save(headers);
+                AppLog.Write($"[模板] 已记录 secsdk 头：{string.Join(", ", headers.Keys)}");
             }
 
             if (found.Count == 0) AppLog.Write("[模板] 一条都没抓到");

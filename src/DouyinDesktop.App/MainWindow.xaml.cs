@@ -100,6 +100,8 @@ public partial class MainWindow : Window
         // 强校验接口走「浏览器模板」：平时不碰浏览器，模板缺失/失效才抓一次
         _client.GetTemplate = ApiTemplate.Get;
         _client.CaptureTemplate = id => TemplateFetcher.CaptureAsync(id);
+        // secsdk 运行时头（x-tt-session-dtrait）：点赞这类写接口缺了会被静默丢弃
+        _client.GetExtraHeaders = SecsdkHeaders.Get;
         _healthHandler = () => Dispatcher.BeginInvoke(UpdateExpiredBadge);
         LoginHealth.Changed += _healthHandler;
         Closed += (_, _) => LoginHealth.Changed -= _healthHandler;
@@ -1125,7 +1127,11 @@ public partial class MainWindow : Window
 
             if (actual is not null && (actual == 1) != like)
             {
-                SetStatus(like ? "点赞没有生效（可能被风控）" : "取消点赞没有生效");
+                // 服务端返回 status_code=0 但状态没变：写接口被静默丢弃（缺 secsdk 头）。
+                // 别骗用户说成功了，直接告诉他去哪点。
+                SetStatus(like
+                    ? "点赞没生效（接口被风控挡了）—— 按 B 在浏览器里点"
+                    : "取消点赞没生效（同上）—— 按 B 在浏览器里操作");
                 return;
             }
 
@@ -1140,7 +1146,11 @@ public partial class MainWindow : Window
     {
         bool liked = _liked.Contains(item.Id);
         long n = item.Statistics?.DiggCount ?? 0;
-        if (liked) n++;     // 自己点的那一下算进去，数字才有反馈
+
+        // 服务端说已赞（user_digged==1）时，digg_count 里已经含了自己那一票；
+        // 只有"本地刚点、服务端还没反映"时才 +1，否则数字会多算一个。
+        if (liked && item.UserDigged != 1) n++;
+
         LikeText.Text = $"{(liked ? "♥" : "♡")} {Aweme.FormatCount(n)}";
         LikeText.Foreground = liked
             ? new SolidColorBrush(Color.FromRgb(0xFE, 0x2C, 0x55))
@@ -2007,8 +2017,13 @@ public partial class MainWindow : Window
         DescScroll.ScrollToTop();
 
         var st = item.Statistics;
-        // 详情接口带了 user_digged 就以此为准，没有就看本次运行里点过没
-        if (item.UserDigged == 1) _liked.Add(item.Id);   // null 表示接口没给，按未点赞处理
+        // user_digged 是**服务端权威状态**（推荐流和详情都会带，实测 10/10 条有值）。
+        // 给了就双向同步本地记忆——只加不删的话，在网页版取消过的赞这里会一直显示"已赞"。
+        if (item.UserDigged is int digged)
+        {
+            if (digged == 1) _liked.Add(item.Id);
+            else _liked.Remove(item.Id);
+        }
         UpdateLikeVisual(item);
         CommentText.Text = $"💬 {Aweme.FormatCount(st?.CommentCount ?? 0)}";
         ShareText.Text = $"↗ {Aweme.FormatCount(st?.ShareCount ?? 0)}";

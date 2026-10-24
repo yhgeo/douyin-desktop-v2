@@ -45,6 +45,16 @@ if ($LASTEXITCODE -ne 0) { Write-Host '[x] 发布失败' -ForegroundColor Red; e
 Get-ChildItem $out -Filter '*.pdb' | Remove-Item -Force
 Get-ChildItem $out -Filter 'Microsoft.Web.WebView2.*.xml' | Remove-Item -Force
 
+# 使用说明.txt / diagnose.bat 不在源码里，publish 不会带。
+# 它们的**唯一来源**是 packaging\（进版本库，改了这里才会生效）。
+$pkg = Join-Path $root 'packaging'
+if (Test-Path $pkg) {
+    Copy-Item (Join-Path $pkg '*') $out -Force
+    Write-Host '      已从 packaging\ 补齐说明文件' -ForegroundColor DarkGray
+} else {
+    Write-Host '[!] 没有 packaging\ 目录，安装包会缺使用说明.txt' -ForegroundColor Yellow
+}
+
 Write-Host '[2/3] 复制到安装目录…' -ForegroundColor Cyan
 $files = @('DouyinDesktop.exe', '使用说明.txt', 'diagnose.bat')
 foreach ($f in $files) {
