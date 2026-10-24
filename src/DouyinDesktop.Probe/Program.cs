@@ -442,6 +442,139 @@ if (args.Length > 0 && args[0] == "user")
     return 0;
 }
 
+// 一次能拉多少条：dotnet run --project src/DouyinDesktop.Probe -- bigfeed
+// 标签过滤后经常剩不下几条，想一次多拉点，先摸清 count 的上限。
+if (args.Length > 0 && args[0] == "bigfeed")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    foreach (int n in new[] { 20, 30, 50, 80 })
+    {
+        string body = await c.GetFeedRawAsync(n);
+        if (body.Length == 0) { Console.WriteLine($"count={n,-3} 空 body"); await Task.Delay(1200); continue; }
+
+        int got = 0;
+        using (var doc = JsonDocument.Parse(body))
+        {
+            if (doc.RootElement.TryGetProperty("aweme_list", out var al) && al.ValueKind == JsonValueKind.Array)
+                got = al.GetArrayLength();
+            else if (doc.RootElement.TryGetProperty("cards", out var cards) && cards.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var card in cards.EnumerateArray())
+                    if (card.TryGetProperty("aweme", out _)) got++;
+            }
+        }
+
+        Console.WriteLine($"count={n,-3} 返回 {got,2} 条  body {body.Length / 1024} KB");
+        await Task.Delay(1500);
+    }
+    return 0;
+}
+
+// 详情接口有没有 video_tag：dotnet run --project src/DouyinDesktop.Probe -- dtags
+if (args.Length > 0 && args[0] == "dtags")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var f = await c.GetFeedAsync(6);
+    if (!f.Success) { Console.WriteLine("拉推荐失败：" + f.Message); return 1; }
+
+    foreach (var item in f.Items.Take(4))
+    {
+        var detail = await c.GetAwemeDetailAsync(item.Id);
+
+        string textTags = detail is null || detail.Hashtags.Count == 0 ? "-" : string.Join(" ", detail.Hashtags);
+        string videoTags = detail is null || detail.OfficialTags.Count == 0 ? "-" : string.Join(" ", detail.OfficialTags);
+
+        Console.WriteLine($"  {item.Id}  {(detail is null ? "详情失败" : "ok")}");
+        Console.WriteLine($"      作者标签[{textTags}]");
+        Console.WriteLine($"      官方标签[{videoTags}]");
+        await Task.Delay(800);
+    }
+    return 0;
+}
+
+// 官方标签 video_tag 覆盖率：dotnet run --project src/DouyinDesktop.Probe -- vtags
+// text_extra 是作者自己加的；video_tag 是平台给的，作者没加标签时也能有。
+if (args.Length > 0 && args[0] == "vtags")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    int total = 0, hasText = 0, hasVideo = 0, hasEither = 0;
+
+    for (int page = 0; page < 3; page++)
+    {
+        string body = await c.GetFeedRawAsync(10);
+        if (body.Length == 0) { Console.WriteLine("空 body"); break; }
+
+        var nodes = new List<JsonElement>();
+        using (var doc = JsonDocument.Parse(body))
+        {
+            if (doc.RootElement.TryGetProperty("aweme_list", out var al) && al.ValueKind == JsonValueKind.Array)
+                foreach (var a in al.EnumerateArray()) nodes.Add(a.Clone());
+            else if (doc.RootElement.TryGetProperty("cards", out var cards) && cards.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var card in cards.EnumerateArray())
+                {
+                    if (!card.TryGetProperty("aweme", out var aw)) continue;
+                    if (aw.ValueKind == JsonValueKind.String)
+                    {
+                        try { using var inner = JsonDocument.Parse(aw.GetString()!); nodes.Add(inner.RootElement.Clone()); }
+                        catch (JsonException) { }
+                    }
+                    else if (aw.ValueKind == JsonValueKind.Object) nodes.Add(aw.Clone());
+                }
+            }
+        }
+
+        foreach (var aw in nodes)
+        {
+            total++;
+
+            var textTags = new List<string>();
+            if (aw.TryGetProperty("text_extra", out var te) && te.ValueKind == JsonValueKind.Array)
+                foreach (var t in te.EnumerateArray())
+                    if (t.TryGetProperty("hashtag_name", out var h) && h.ValueKind == JsonValueKind.String)
+                    {
+                        string v = h.GetString() ?? "";
+                        if (v.Length > 0) textTags.Add(v);
+                    }
+
+            var vTags = new List<string>();
+            if (aw.TryGetProperty("video_tag", out var vt) && vt.ValueKind == JsonValueKind.Array)
+                foreach (var t in vt.EnumerateArray())
+                    if (t.TryGetProperty("tag_name", out var n) && n.ValueKind == JsonValueKind.String)
+                    {
+                        string v = n.GetString() ?? "";
+                        if (v.Length > 0) vTags.Add(v);
+                    }
+
+            if (textTags.Count > 0) hasText++;
+            if (vTags.Count > 0) hasVideo++;
+            if (textTags.Count > 0 || vTags.Count > 0) hasEither++;
+
+            string nick = "";
+            if (aw.TryGetProperty("author", out var au) && au.TryGetProperty("nickname", out var nn) && nn.ValueKind == JsonValueKind.String)
+                nick = nn.GetString() ?? "";
+
+            Console.WriteLine($"  @{nick,-13} 作者标签[{(textTags.Count == 0 ? "-" : string.Join(" ", textTags))}]" +
+                              $"  官方标签[{(vTags.Count == 0 ? "-" : string.Join(" ", vTags))}]");
+        }
+        await Task.Delay(1200);
+    }
+
+    Console.WriteLine($"\n共 {total} 条：作者标签 {hasText} 条（{hasText * 100 / Math.Max(1, total)}%），" +
+                      $"官方标签 {hasVideo} 条（{hasVideo * 100 / Math.Max(1, total)}%），" +
+                      $"至少一个 {hasEither} 条（{hasEither * 100 / Math.Max(1, total)}%）");
+    return 0;
+}
+
 // 标签覆盖率：dotnet run --project src/DouyinDesktop.Probe -- tags
 // 判断"按标签做自定义推荐"可不可行——先看有多少作品带标签。
 if (args.Length > 0 && args[0] == "tags")

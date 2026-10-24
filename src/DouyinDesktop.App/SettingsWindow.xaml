@@ -163,18 +163,35 @@
 
                     <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,14,0,0">
                         <StackPanel>
-                            <TextBlock Text="内容偏好（按标签过滤）" Foreground="{StaticResource TextBrush}" FontSize="13" />
+                            <TextBlock Text="内容偏好（标签分组）" Foreground="{StaticResource TextBrush}" FontSize="13" />
                             <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,9,0,0"
                                        TextWrapping="Wrap" LineHeight="18"
-                                       Text="一行一条。不带前缀 = 只看这类；- 前缀 = 屏蔽这类。&#10;匹配是包含关系（“短剧”能命中“热播短剧”）。留空不过滤。&#10;例：  助眠     /     -短剧" />
-                            <TextBox x:Name="TagRulesBox" Margin="0,10,0,0" Height="88"
+                                       Text="用 [组名] 分成几套规则，主界面按「切换标签分组」的键循环切。&#10;组内一行一条：不带前缀 = 只看这类，- 前缀 = 屏蔽这类。&#10;匹配是包含关系（“短剧”能命中“热播短剧”），留空不过滤。" />
+                            <TextBox x:Name="TagGroupBox" Margin="0,10,0,0" Height="132"
                                      Background="#101016" Foreground="{StaticResource TextBrush}"
                                      BorderBrush="#2A2A34" CaretBrush="{StaticResource TextBrush}"
                                      AcceptsReturn="True" TextWrapping="Wrap"
                                      VerticalScrollBarVisibility="Auto"
                                      FontSize="12" Padding="8,6"
-                                     TextChanged="OnTagRulesChanged" />
-                            <TextBlock x:Name="TagRulesHint" FontSize="11" Foreground="#5A5A66" Margin="0,6,0,0" />
+                                     FontFamily="Consolas, Microsoft YaHei"
+                                     TextChanged="OnTagGroupChanged" />
+                            <TextBlock x:Name="TagGroupHint" FontSize="11" Foreground="#5A5A66" Margin="0,6,0,0" />
+
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                <TextBlock Text="每批拉取" FontSize="12" Foreground="#8A8A96"
+                                           VerticalAlignment="Center" />
+                                <ComboBox x:Name="BatchSizeBox" Width="196" Margin="12,0,0,0"
+                                          Background="#101016" Foreground="{StaticResource TextBrush}"
+                                          BorderBrush="#2A2A34" FontSize="12"
+                                          SelectionChanged="OnBatchSizeChanged">
+                                    <ComboBoxItem Content="20 条 · 约 3MB（默认）" Tag="20" />
+                                    <ComboBoxItem Content="30 条 · 约 4.5MB" Tag="30" />
+                                    <ComboBoxItem Content="50 条 · 约 8MB（过滤用）" Tag="50" />
+                                    <ComboBoxItem Content="80 条 · 约 12MB（最慢）" Tag="80" />
+                                </ComboBox>
+                            </StackPanel>
+                            <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,6,0,0" TextWrapping="Wrap"
+                                       Text="只拉信息（地址/标签/统计），不下载视频。开了标签过滤建议调大。" />
                         </StackPanel>
                     </Border>
 

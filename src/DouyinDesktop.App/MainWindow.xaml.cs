@@ -82,6 +82,9 @@ public partial class MainWindow : Window
     private bool _danmakuBusy;
     /// <summary>哪条作品的 file-loaded 已经到了。弹幕要等它，别跟视频抢带宽。</summary>
     private string _fileLoadedFor = "";
+
+    /// <summary>当前这条的平台标签（video_tag）。只有详情接口给，异步补。</summary>
+    private IReadOnlyList<string> _officialTags = Array.Empty<string>();
     private CancellationTokenSource? _danmakuCts;
     private readonly Dictionary<string, DanmakuItem> _danmakuItems = new();
 
@@ -616,7 +619,7 @@ public partial class MainWindow : Window
                     return;
                 }
 
-                var r = await _client.GetFeedScrollAsync(10, _refreshIndex++, "follow/feed");
+                var r = await _client.GetFeedScrollAsync(_settings.FeedBatchSize, _refreshIndex++, "follow/feed");
                 if (!r.Success)
                 {
                     SetStatus("关注流加载失败：" + r.Message);
@@ -669,8 +672,8 @@ public partial class MainWindow : Window
                 // 两个推荐接口交替用：module/feed 和 tab/feed 的内容池不同，
                 // 混着拉能增加内容多样性（图集比例也会略有提升）
                 var result = _useScrollFeed
-                    ? await _client.GetFeedScrollAsync(10, _refreshIndex++)
-                    : await _client.GetFeedAsync(15, _presented);
+                    ? await _client.GetFeedScrollAsync(_settings.FeedBatchSize, _refreshIndex++)
+                    : await _client.GetFeedAsync(_settings.FeedBatchSize, _presented);
                 _useScrollFeed = !_useScrollFeed;
 
                 if (!result.Success)
@@ -693,7 +696,7 @@ public partial class MainWindow : Window
             }
 
             // 一批全被筛掉：得说清楚，否则用户会以为"加载不出来"是程序坏了
-            var activeRule = TagRule.Parse(_settings.TagRules);
+            var activeRule = CurrentTagRule;
             if (got.Count == 0 && !activeRule.IsEmpty)
             {
                 PushStatus($"这一批 {elapsed}ms 全被标签规则筛掉了（{activeRule.Describe()}）");
@@ -718,10 +721,88 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>按设置里的标签规则过滤。规则为空时原样返回。</summary>
+    /// <summary>循环切到下一个标签分组，然后按新规则重新拉一批。</summary>
+    private async Task SwitchTagGroupAsync()
+    {
+        var groups = CurrentTagGroups;
+        if (groups.IsEmpty)
+        {
+            SetStatus("还没配标签分组（设置 → 播放 → 内容偏好）");
+            return;
+        }
+
+        _settings.ActiveTagGroup = groups.Next(_settings.ActiveTagGroup);
+        _settings.Save();
+
+        SetStatus("标签组：" + groups.Describe(_settings.ActiveTagGroup));
+        AppLog.Write($"[标签] 切到分组 {_settings.ActiveTagGroup}");
+
+        // 规则变了，旧列表按旧规则筛的，不能再混着用
+        _authorMode = false;
+        _followMode = false;
+        _feed = _recommendFeed;
+        UpdateModeLabel();
+        await LoadFeedAsync(reset: true);
+    }
+
+    /// <summary>当前生效的标签分组。</summary>
+    private TagGroups CurrentTagGroups => TagGroups.Parse(_settings.TagGroupText);
+
+    /// <summary>当前分组的过滤规则。</summary>
+    private TagRule CurrentTagRule => TagRule.Parse(CurrentTagGroups.RulesOf(_settings.ActiveTagGroup));
+
+    /// <summary>
+    /// 画标签行：作者标签在前，平台分类在后（用 ｜ 隔开）。
+    /// 平台标签（video_tag）比作者标签规整得多——是"美食 → 美食探店 → 餐厅探店"这种分级。
+    /// </summary>
+    private void UpdateTagText(Aweme item)
+    {
+        if (TagText is null) return;
+
+        var parts = new List<string>();
+
+        var author = item.Hashtags;
+        if (author.Count > 0)
+            parts.Add(string.Join("  ", author.Select(t => "#" + t)));
+
+        if (_officialTags.Count > 0)
+            parts.Add("官方　" + string.Join(" · ", _officialTags));
+
+        TagText.Text = string.Join("\n", parts);
+        TagText.Visibility = parts.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>
+    /// 异步拉一次详情，把平台标签补上。
+    ///
+    /// 推荐流不返回 video_tag（实测 30 条全 null），只有详情接口给。
+    /// 不阻塞播放——拉到就刷新，拉不到就算了。
+    /// </summary>
+    private async Task FetchOfficialTagsAsync(Aweme item)
+    {
+        // 已经带了（比如从作者主页进来的作品）就不用再拉
+        if (item.OfficialTags.Count > 0) return;
+
+        try
+        {
+            var detail = await _client.GetAwemeDetailAsync(item.Id);
+
+            // 拉的过程中用户可能已经切走了，别把别人的标签画上去
+            if (detail is null || CurrentId != item.Id) return;
+
+            _officialTags = detail.OfficialTags;
+            UpdateTagText(item);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("[标签] 拉详情失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>按当前分组的标签规则过滤。规则为空时原样返回。</summary>
     private IReadOnlyList<Aweme> ApplyTagFilter(IReadOnlyList<Aweme> items)
     {
-        var rule = TagRule.Parse(_settings.TagRules);
+        var rule = CurrentTagRule;
         if (rule.IsEmpty || items.Count == 0) return items;
 
         var kept = items.Where(rule.Allows).ToList();
@@ -755,8 +836,8 @@ public partial class MainWindow : Window
             SetStatus($"只看图集：第 {i + 1} 次筛选，已找到 {images.Count} 条…");
 
             var r = _useScrollFeed
-                ? await _client.GetFeedScrollAsync(10, _refreshIndex++)
-                : await _client.GetFeedAsync(20, _presented);
+                ? await _client.GetFeedScrollAsync(_settings.FeedBatchSize, _refreshIndex++)
+                : await _client.GetFeedAsync(_settings.FeedBatchSize, _presented);
             _useScrollFeed = !_useScrollFeed;
 
             if (!r.Success) break;
@@ -2092,13 +2173,10 @@ public partial class MainWindow : Window
         UpdateMetaLine(item, item.IpLabel);
         DescText.Text = string.IsNullOrWhiteSpace(item.Desc) ? "（无文案）" : item.Desc;
 
-        // 话题标签（实测 84% 的作品有），既是内容线索，也方便照着配过滤规则
-        var tags = item.Hashtags;
-        if (TagText is not null)
-        {
-            TagText.Text = tags.Count == 0 ? "" : string.Join("  ", tags.Select(t => "#" + t));
-            TagText.Visibility = tags.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        }
+        // 标签：作者自己加的话题（列表里就有）+ 平台分类（只有详情接口给，异步补）
+        _officialTags = item.OfficialTags;
+        UpdateTagText(item);
+        _ = FetchOfficialTagsAsync(item);
 
         // 固定高度里放不下就缩字号（14 → 13 → 12），配合滚动条
         DescText.FontSize = item.Desc.Length switch
@@ -2335,7 +2413,11 @@ public partial class MainWindow : Window
                     else SwitchTab(SideTab.Profile);
                     break;
 
-                case "follow":
+                case "taggroup":
+                await SwitchTagGroupAsync();
+                break;
+
+            case "follow":
                     _followMode = !_followMode;
                     _authorMode = false;
                     await SwitchFeedAsync(

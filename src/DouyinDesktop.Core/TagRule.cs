@@ -55,7 +55,10 @@ public sealed class TagRule
     {
         if (IsEmpty) return true;
 
-        var tags = item.Hashtags;
+        // 作者标签 + 平台标签一起参与匹配。
+        // 平台标签（video_tag）只有详情接口给，所以列表过滤时通常只有作者标签；
+        // 详情加载后再判一次能更准。
+        var tags = item.Hashtags.Concat(item.OfficialTags).ToList();
 
         // 黑名单优先：带一个就丢，不管白名单
         foreach (string blocked in Block)

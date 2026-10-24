@@ -27,6 +27,7 @@ public sealed class KeyMap
         new("like",       "点赞 / 取消",  Key.X,      Array.Empty<Key>()),
         new("openweb",    "在浏览器中打开", Key.B,    Array.Empty<Key>()),
         new("follow",     "关注页 / 推荐页", Key.G,   Array.Empty<Key>()),
+        new("taggroup",   "切换标签分组",   Key.None, Array.Empty<Key>()),
 
         // 下面三个**默认不绑键**：都不是高频操作，绑着反而容易误触。
         // 要用的自己去 设置 → 快捷键 里加。

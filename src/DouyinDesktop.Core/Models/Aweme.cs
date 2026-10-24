@@ -34,6 +34,19 @@ public sealed class Aweme
     /// <summary>文案里的话题标签（结构化）。覆盖率实测 84%，平均每条 3 个。</summary>
     [JsonPropertyName("text_extra")] public List<TextExtra>? TextExtra { get; init; }
 
+    /// <summary>
+    /// 平台给视频打的标签（不是作者加的）。
+    /// 实测推荐流里 30 条全是 null，详情接口待验证——有的话能补上"作者没加标签"的那 14%。
+    /// </summary>
+    [JsonPropertyName("video_tag")] public List<VideoTag>? VideoTag { get; init; }
+
+    /// <summary>平台标签名（不含 #）。</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> OfficialTags =>
+        VideoTag is null
+            ? Array.Empty<string>()
+            : VideoTag.Where(x => x.TagName.Length > 0).Select(x => x.TagName).ToArray();
+
     /// <summary>话题名（不含 #），给标签过滤用。</summary>
     [JsonIgnore]
     public IReadOnlyList<string> Hashtags =>
@@ -75,6 +88,12 @@ public sealed class Aweme
 /// <summary>
 /// 文案里的一段附加内容。type=1 是话题标签，hashtag_name 就是 # 后面的名字。
 /// </summary>
+/// <summary>平台给视频打的标签。tag_id 在 JSON 里可能是数字也可能是字符串，这里只取名字。</summary>
+public sealed class VideoTag
+{
+    [JsonPropertyName("tag_name")] public string TagName { get; init; } = "";
+}
+
 public sealed class TextExtra
 {
     [JsonPropertyName("hashtag_name")] public string HashtagName { get; init; } = "";

@@ -152,18 +152,22 @@
                                        Margin="0,0,0,12" Visibility="Collapsed" />
 
                             <!-- 文案固定高度：太长就在框里滚，不把下面全挤走 -->
-                            <ScrollViewer x:Name="DescScroll" MaxHeight="132" Margin="0,0,0,16"
+                            <ScrollViewer x:Name="DescScroll" MaxHeight="160" Margin="0,0,0,10"
                                           VerticalScrollBarVisibility="Auto"
                                           HorizontalScrollBarVisibility="Disabled">
                                 <TextBlock x:Name="DescText" Text="" FontSize="14" LineHeight="23"
                                            TextWrapping="Wrap" Foreground="#D6D6DE" />
                             </ScrollViewer>
 
-                            <!-- 话题标签：方便看清这条属于什么，也方便去设置里配过滤规则 -->
-                            <TextBlock x:Name="TagText" Text="" FontSize="11" Margin="0,8,0,0"
-                                       TextWrapping="Wrap" Foreground="#6E6E7C" />
+                            <!-- 标签：第一行作者话题，第二行平台分类（只有详情接口给）。
+                                 紧贴文案，因为它是"这条讲什么"的一部分；下面才是互动数据。 -->
+                            <TextBlock x:Name="TagText" Text="" FontSize="11" LineHeight="19"
+                                       Margin="0,0,0,12" TextWrapping="Wrap" Foreground="#6E6E7C" />
 
-                            <StackPanel x:Name="StatsPanel" Orientation="Horizontal" Margin="0,0,0,18">
+                            <!-- 细分隔线：把"内容"和"数据"分开，不然整块糊在一起 -->
+                            <Border Height="1" Background="#1F1F28" Margin="0,0,0,12" />
+
+                            <StackPanel x:Name="StatsPanel" Orientation="Horizontal" Margin="0,0,0,16">
                                 <!-- 包一层 Border：TextBlock 没背景时点击热区只有字形那点大，
                                      鼠标经常点不中 -->
                                 <Border Background="Transparent" Cursor="Hand"
@@ -175,10 +179,11 @@
                             </StackPanel>
 
                             <TextBlock x:Name="MusicText" Style="{StaticResource Caption}"
-                                       TextWrapping="Wrap" Margin="0,0,0,4" />
+                                       TextWrapping="Wrap" Margin="0,0,0,10" />
 
                             <!-- 视频技术参数（来自 mpv 实时属性） -->
-                            <Grid x:Name="VideoStatsPanel" Margin="0,14,0,0">
+                            <Border Height="1" Background="#1F1F28" Margin="0,4,0,12" />
+                            <Grid x:Name="VideoStatsPanel" Margin="0,0,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="54" />
                                     <ColumnDefinition Width="*" />
@@ -204,7 +209,7 @@
                             </Grid>
 
                             <!-- 图集信息（图集没有视频流，mpv 的参数不适用） -->
-                            <Grid x:Name="ImageStatsPanel" Margin="0,14,0,0" Visibility="Collapsed">
+                            <Grid x:Name="ImageStatsPanel" Margin="0,0,0,0" Visibility="Collapsed">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="54" />
                                     <ColumnDefinition Width="*" />

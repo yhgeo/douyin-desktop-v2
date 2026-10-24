@@ -42,9 +42,23 @@ public partial class SettingsWindow : Window
         DataPathText.Text = DouyinDesktop.Core.DouyinPaths.DataDirectory;
         ImageOnlyCheck.IsChecked = settings.ImageOnly;
 
-        // 标签过滤：先填文本（会触发一次 TextChanged，那里有 null guard）
-        if (TagRulesBox is not null) TagRulesBox.Text = settings.TagRules;
-        UpdateTagRulesHint();
+        // 标签分组：先填文本（会触发一次 TextChanged，那里有 null guard）
+        if (TagGroupBox is not null) TagGroupBox.Text = settings.TagGroupText;
+        UpdateTagGroupHint();
+
+        // 每批拉取条数
+        if (BatchSizeBox is not null)
+        {
+            foreach (var obj in BatchSizeBox.Items)
+            {
+                if (obj is ComboBoxItem it && it.Tag?.ToString() == settings.FeedBatchSize.ToString())
+                {
+                    BatchSizeBox.SelectedItem = it;
+                    break;
+                }
+            }
+            if (BatchSizeBox.SelectedItem is null) BatchSizeBox.SelectedIndex = 0;
+        }
         LoadDanmakuUi();
         RefreshAccount();
 
@@ -63,28 +77,52 @@ public partial class SettingsWindow : Window
     private void OnNavAbout(object sender, RoutedEventArgs e) => SwitchPage("about");
 
     /// <summary>
-    /// 标签过滤规则改了。
+    /// 标签分组文本改了。
     ///
     /// ⚠️ WPF 在 XAML 解析阶段就会触发一次 TextChanged，那时构造函数里的字段
     /// （_settings、其它命名控件）还是 null —— 必须 guard，否则设置窗口直接弹"出错了"。
     /// </summary>
-    private void OnTagRulesChanged(object sender, TextChangedEventArgs e)
+    /// <summary>
+    /// 每批拉多少条。
+    /// ⚠️ 同样要在 XAML 解析阶段 guard —— SelectionChanged 会比构造函数先跑。
+    /// </summary>
+    private void OnBatchSizeChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_settings is null || TagRulesBox is null) return;
+        if (_settings is null || BatchSizeBox?.SelectedItem is not ComboBoxItem item) return;
+        if (!int.TryParse(item.Tag?.ToString(), out int size)) return;
 
-        _settings.TagRules = TagRulesBox.Text;
+        _settings.FeedBatchSize = size;
         _settings.Save();
-        UpdateTagRulesHint();
     }
 
-    private void UpdateTagRulesHint()
+    private void OnTagGroupChanged(object sender, TextChangedEventArgs e)
     {
-        if (TagRulesHint is null) return;
+        if (_settings is null || TagGroupBox is null) return;
 
-        var rule = TagRule.Parse(TagRulesBox?.Text);
-        TagRulesHint.Text = rule.IsEmpty
-            ? "留空 = 不过滤，按抖音原样推荐"
-            : $"当前：{rule.Describe()}";
+        _settings.TagGroupText = TagGroupBox.Text;
+
+        // 当前组可能被改名/删掉了，重新校准一次
+        var groups = TagGroups.Parse(_settings.TagGroupText);
+        if (!groups.IsEmpty && !groups.Items.Any(g => g.Name == _settings.ActiveTagGroup))
+            _settings.ActiveTagGroup = groups.Items[0].Name;
+
+        _settings.Save();
+        UpdateTagGroupHint();
+    }
+
+    private void UpdateTagGroupHint()
+    {
+        if (TagGroupHint is null) return;
+
+        var groups = TagGroups.Parse(TagGroupBox?.Text);
+        if (groups.IsEmpty)
+        {
+            TagGroupHint.Text = "留空 = 不过滤，按抖音原样推荐";
+            return;
+        }
+
+        var names = string.Join(" / ", groups.Items.Select(g => g.Name));
+        TagGroupHint.Text = $"{groups.Items.Count} 个分组：{names}　·　当前：{groups.Describe(_settings?.ActiveTagGroup)}";
     }
 
     private void OnImageOnlyChanged(object sender, RoutedEventArgs e)

@@ -36,6 +36,32 @@ public sealed class AppSettings
     public string TagRules { get; set; } = "";
 
     /// <summary>
+    /// 标签分组（INI 风格，见 <see cref="DouyinDesktop.Core.TagGroups"/>）：
+    /// <code>
+    /// [助眠]
+    /// 助眠
+    /// 解压
+    ///
+    /// [技术]
+    /// 单片机
+    /// -短剧
+    /// </code>
+    /// </summary>
+    public string TagGroupText { get; set; } = "";
+
+    /// <summary>当前生效的组名（空 = 用第一组）。</summary>
+    public string ActiveTagGroup { get; set; } = "";
+
+    /// <summary>
+    /// 每批拉多少条。抖音接口对 count 没硬上限（实测 80 条能返回 77 条），
+    /// 但每条 JSON 约 150KB —— 20 条约 3MB，80 条约 12MB。
+    ///
+    /// 标签过滤会筛掉不少，所以开了过滤时建议调大；只关心速度就保持 20。
+    /// 注意：这里拉的是**纯信息**（视频地址、标签、统计），视频文件只在播放/预取时才下载。
+    /// </summary>
+    public int FeedBatchSize { get; set; } = 20;
+
+    /// <summary>
     /// 显示弹幕。默认关——不是每个视频都有弹幕，而且渲染走的是 mpv 的字幕轨，
     /// 关着的时候行为和不支持弹幕的版本完全一样，不会有任何副作用。
     /// </summary>
@@ -96,6 +122,10 @@ public sealed class AppSettings
         {
             s = new AppSettings();
         }
+
+        // 老版本只有单套 TagRules，没有分组。迁移成"默认"组，别让用户白配一遍。
+        if (s.TagGroupText.Length == 0 && s.TagRules.Trim().Length > 0)
+            s.TagGroupText = s.TagRules;
 
         // 写回一次，保证文件里字段完整（老配置文件缺新字段时会被补齐）。
         // 弹幕外观在 设置 → 播放 里有滑杆，也能直接手改这个文件。
