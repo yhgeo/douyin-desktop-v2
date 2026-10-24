@@ -386,6 +386,58 @@ if (args.Length > 0 && args[0] == "user")
     return 0;
 }
 
+// 个性化对比：两个 webid 各拉一批推荐，看内容差多少
+// dotnet run --project src/DouyinDesktop.Probe -- webidcmp
+if (args.Length > 0 && args[0] == "webidcmp")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+    string Read(string name)
+    {
+        string p = Path.Combine(DouyinPaths.DataDirectory, name);
+        return File.Exists(p) ? File.ReadAllText(p).Trim() : "";
+    }
+
+    var cases = new (string Label, string WebId)[]
+    {
+        ("webid-app（程序随机）", Read("webid-app.txt")),
+        ("webid.txt（浏览器真实）", Read("webid.txt")),
+    };
+
+    var seen = new Dictionary<string, HashSet<string>>();
+
+    foreach (var (label, wid) in cases)
+    {
+        if (wid.Length < 10) { Console.WriteLine($"{label}：没有值，跳过"); continue; }
+
+        Console.WriteLine($"\n=== {label}  webid={wid} ===");
+        var profile = new DeviceProfile { WebId = wid, BrowserWebId = wid };
+        using var c = DouyinClient.Create(profile);
+        c.Log += m => Console.WriteLine("    " + m);
+
+        var f = await c.GetFeedAsync(10);
+        if (!f.Success) { Console.WriteLine("    失败：" + f.Message); continue; }
+
+        var ids = new HashSet<string>();
+        foreach (var a in f.Items)
+        {
+            ids.Add(a.Id);
+            string desc = a.Desc.Length > 30 ? a.Desc[..30] : a.Desc;
+            Console.WriteLine($"    @{a.AuthorName,-14} ♥{a.Statistics?.DiggCount,8}  {desc}");
+        }
+        seen[label] = ids;
+        await Task.Delay(1200);
+    }
+
+    if (seen.Count == 2)
+    {
+        var vals = seen.Values.ToList();
+        int overlap = vals[0].Intersect(vals[1]).Count();
+        Console.WriteLine($"\n两批重合 {overlap} 条 / 各 {vals[0].Count} 条");
+    }
+    return 0;
+}
+
 // 推荐流参数实验：dotnet run --project src/DouyinDesktop.Probe -- feedtest
 // 目标：找到能让推荐流返回图集（aweme_type=68）的参数组合
 if (args.Length > 0 && args[0] == "feedtest")

@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="DouyinDesktop.Core/DouyinDesktop.Core.csproj" />
-  <Project Path="DouyinDesktop.Probe/DouyinDesktop.Probe.csproj" />
-  <Project Path="DouyinDesktop.Tests/DouyinDesktop.Tests.csproj" />
-</Solution>

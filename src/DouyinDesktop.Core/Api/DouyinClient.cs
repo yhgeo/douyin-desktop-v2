@@ -157,7 +157,8 @@ public sealed class DouyinClient : IDisposable
         DouyinSession session, int count, string presentedIds, CancellationToken ct)
     {
         int refreshIndex = _refreshIndex++;
-        var ps = _profile.FeedParams(count, presentedIds, session.MsToken, refreshIndex);
+        var ps = _profile.FeedParams(count, presentedIds, session.MsToken, refreshIndex,
+            session.EffectiveUifid);
         string query = UrlCodec.ToQuery(ps);
 
         // 签名算的是原始 query；a_bogus 和指纹参数追加在签名之后
@@ -313,7 +314,7 @@ public sealed class DouyinClient : IDisposable
             new("downlink", "10"),
             new("effective_type", "4g"),
             new("round_trip_time", "100"),
-            new("webid", _profile.WebId),
+            new("webid", _profile.EffectiveWebId),
             new("msToken", session.MsToken),
         };
 
@@ -419,7 +420,7 @@ public sealed class DouyinClient : IDisposable
             new("downlink", "10"),
             new("effective_type", "4g"),
             new("round_trip_time", "50"),
-            new("webid", _profile.WebId),
+            new("webid", _profile.EffectiveWebId),
             new("msToken", session.MsToken),
         };
 
@@ -504,7 +505,7 @@ public sealed class DouyinClient : IDisposable
             new("end_time", endMs.ToString()),
         };
         ps.AddRange(_profile.PlatformParams());
-        ps.Add(new("webid", _profile.WebId));
+        ps.Add(new("webid", _profile.EffectiveWebId));
         ps.Add(new("msToken", session.MsToken));
 
         string query = UrlCodec.ToQuery(ps);
@@ -670,7 +671,19 @@ public sealed class DouyinClient : IDisposable
     /// </summary>
     public async Task<bool?> VerifyLoginAsync(CancellationToken ct = default)
     {
-        if (Session?.IsLoggedIn != true) return false;
+        // Session 在第一次请求前是 null。直接返回 false 会让设置页
+        // 把"还没加载"显示成"登录已失效，请重新扫码"。
+        DouyinSession session;
+        try
+        {
+            session = Session ?? await EnsureSessionAsync(ct: ct);
+        }
+        catch
+        {
+            return null;    // 网络问题判断不了
+        }
+
+        if (!session.IsLoggedIn) return false;
 
         int code = await DiggRawAsync("7000000000000000000", true, ct);
         if (code < 0) return null;
@@ -697,7 +710,7 @@ public sealed class DouyinClient : IDisposable
             new("type", like ? "1" : "0"),
         };
         ps.AddRange(_profile.PlatformParams());
-        ps.Add(new("webid", _profile.WebId));
+        ps.Add(new("webid", _profile.EffectiveWebId));
         ps.Add(new("msToken", session.MsToken));
 
         string query = UrlCodec.ToQuery(ps);
@@ -787,7 +800,7 @@ public sealed class DouyinClient : IDisposable
             new("downlink", "10"),
             new("effective_type", "4g"),
             new("round_trip_time", "0"),
-            new("webid", _profile.WebId),
+            new("webid", _profile.EffectiveWebId),
             new("uifid", session.EffectiveUifid),
             new("verifyFp", session.EffectiveSvWebId),
             new("fp", session.EffectiveSvWebId),
@@ -903,7 +916,7 @@ public sealed class DouyinClient : IDisposable
             new("rcFT", ""),
         };
         ps.AddRange(_profile.PlatformParams());
-        ps.Add(new("webid", _profile.WebId));
+        ps.Add(new("webid", _profile.EffectiveWebId));
         ps.Add(new("msToken", session.MsToken));
 
         string query = UrlCodec.ToQuery(ps);
@@ -1031,7 +1044,8 @@ public sealed class DouyinClient : IDisposable
         };
 
         string uifid = session.EffectiveUifid;
-        ps.Add(new("webid", _profile.WebId));
+        // 强校验接口用浏览器真实 webid（本机随机值会被拒，实测空 body）
+        ps.Add(new("webid", _profile.EffectiveWebId));
         if (!string.IsNullOrEmpty(uifid)) ps.Add(new("uifid", uifid));
         ps.Add(new("msToken", session.MsToken));
 
@@ -1065,16 +1079,30 @@ public sealed class DouyinClient : IDisposable
             sw.Stop();
 
             if (!resp.IsSuccessStatusCode)
+            {
+                Log?.Invoke($"[主页] HTTP {(int)resp.StatusCode}，长度 {body.Length}");
                 return FeedResult.Fail($"HTTP {(int)resp.StatusCode}", sw.ElapsedMilliseconds);
+            }
 
             var items = ParseAwemeList(body);
 
-
             if (items.Count == 0)
             {
-                ReportLoginExpired();
-                string snippet = body.Length > 160 ? body[..160].Replace('\n', ' ') + "…" : body;
-                return FeedResult.Fail($"没有作品：{snippet}", sw.ElapsedMilliseconds);
+                // 空 body 是登录态失效；**有 body 却解析不出作品**是另一回事
+                // （参数/签名被拒、接口结构变了），别混成一句"没有作品"。
+                var hs = resp.Headers
+                    .Where(h => h.Key.StartsWith("x-tt", StringComparison.OrdinalIgnoreCase)
+                             || h.Key.Equals("content-length", StringComparison.OrdinalIgnoreCase))
+                    .Select(h => $"{h.Key}={string.Join(",", h.Value)}");
+                string shape = body.Length == 0
+                    ? "(空 body)"
+                    : body[..Math.Min(200, body.Length)].Replace('\n', ' ');
+
+                Log?.Invoke($"[主页] 0 条，HTTP {(int)resp.StatusCode}，长度 {body.Length}，头：{string.Join(" | ", hs)}");
+                Log?.Invoke("[主页URL] " + url);
+
+                if (body.Length == 0) ReportLoginExpired();
+                return FeedResult.Fail($"没有作品：{shape}", sw.ElapsedMilliseconds);
             }
 
             Log?.Invoke($"用户作品 {items.Count} 条 / {sw.ElapsedMilliseconds}ms");
@@ -1160,7 +1188,7 @@ public sealed class DouyinClient : IDisposable
             new("aweme_id", awemeId),
         };
         ps.AddRange(_profile.PlatformParams());
-        ps.Add(new("webid", _profile.WebId));
+        ps.Add(new("webid", _profile.EffectiveWebId));
 
         string uifid = session.EffectiveUifid;
         if (!string.IsNullOrEmpty(uifid)) ps.Add(new("uifid", uifid));

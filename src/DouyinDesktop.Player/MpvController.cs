@@ -91,6 +91,9 @@ public sealed class MpvController : IAsyncDisposable
     private string _hwdec = "";
     private DateTime _lastStatsAt = DateTime.MinValue;
 
+    /// <summary>图集播过背景音乐时 vid 被设成 no，切回视频才需要恢复。</summary>
+    private bool _videoDisabled;
+
     public event Action<double>? TimePosChanged;
     public event Action<double>? DurationChanged;
     public event Action<bool>? PausedChanged;
@@ -219,8 +222,14 @@ public sealed class MpvController : IAsyncDisposable
         _vBitrate = 0;
         _vCodec = _aCodec = _hwdec = "";
 
-        // 图集播过音乐的话 vid 是 no，这里要恢复
-        await _ipc.CommandAsync("set", "vid", "auto");
+        // 图集播过音乐的话 vid 是 no，这里要恢复。
+        // 只在真的被关过时才发——每次切换都发一条等于白多一次 IPC 往返。
+        if (_videoDisabled)
+        {
+            await _ipc.CommandAsync("set", "vid", "auto");
+            _videoDisabled = false;
+        }
+
         await _ipc.CommandAsync("loadfile", url, "replace");
         if (autoPlay) await _ipc.CommandAsync("set", "pause", "no");
     }
@@ -233,6 +242,7 @@ public sealed class MpvController : IAsyncDisposable
         Log?.Invoke("loadfile (audio) " + url);
         _endHandled = false;
         await _ipc.CommandAsync("set", "vid", "no");
+        _videoDisabled = true;
         await _ipc.CommandAsync("loadfile", url, "replace");
         await _ipc.CommandAsync("set", "pause", "no");
     }

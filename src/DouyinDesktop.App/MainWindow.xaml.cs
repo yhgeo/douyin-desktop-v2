@@ -80,6 +80,8 @@ public partial class MainWindow : Window
     private string? _danmakuAssPath;
     private long _danmakuLoadedTo;          // 已经拉到第几毫秒
     private bool _danmakuBusy;
+    /// <summary>哪条作品的 file-loaded 已经到了。弹幕要等它，别跟视频抢带宽。</summary>
+    private string _fileLoadedFor = "";
     private CancellationTokenSource? _danmakuCts;
     private readonly Dictionary<string, DanmakuItem> _danmakuItems = new();
 
@@ -358,20 +360,23 @@ public partial class MainWindow : Window
         string playUri = play.Video?.PlayAddr?.Uri ?? "";
         if (playUri.Length == 0) return false;
 
-        SetStatus("接着上次继续…");
-        var probe = await _client.ProbeStreamAsync(playUri);
-        if (!probe.Ok)
+        // 播放地址带鉴权参数，放久了必然失效。存得太久就直接拉新推荐，
+        // 免得先黑屏一次再重试。
+        var age = DateTime.UtcNow - snap.SavedAt;
+        if (age > TimeSpan.FromHours(6))
         {
-            AppLog.Write($"上次的播放地址已失效（{probe.Detail}），重新拉推荐");
+            AppLog.Write($"上次现场已存 {age.TotalHours:0.#} 小时，地址多半失效，直接拉新推荐");
             LastSession.Clear();
             return false;
         }
 
         _index = start;
         _restoredSession = true;
-        AppLog.Write($"接着上次：{_items.Count} 条，从第 {start + 1} 条开始（上次第 {saved + 1} 条），" +
-                     $"探活 {probe.ElapsedMs}ms");
+        AppLog.Write($"接着上次：{_items.Count} 条，从第 {start + 1} 条开始（上次第 {saved + 1} 条，" +
+                     $"存于 {age.TotalMinutes:0} 分钟前）");
 
+        // 这里**不再先探活**：一次 1KB Range 要 450–590ms，等于每次启动都白等。
+        // 地址真失效时 OnFileFailed 会刷新地址重试，整批失效就重新拉推荐。
         await PlayIndexAsync(_index, force: true);
         return true;
     }
@@ -451,12 +456,13 @@ public partial class MainWindow : Window
         Top = wa.Top + (wa.Height - Height) / 2;
     }
 
+    /// <summary>从 exe 往上找项目根（认解决方案文件，别认某个 md——文档会搬家）。</summary>
     private static string? FindProjectRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         for (int i = 0; i < 10 && dir is not null; i++, dir = dir.Parent)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "PLAN.md"))
+            if (File.Exists(Path.Combine(dir.FullName, "DouyinDesktop.sln"))
                 && Directory.Exists(Path.Combine(dir.FullName, "src")))
                 return dir.FullName;
         }
@@ -779,13 +785,18 @@ public partial class MainWindow : Window
         var ct = cts.Token;
         try
         {
-            // 等真正开播再拉弹幕：切换瞬间视频还在建连接/缓冲，
-            // 这时候连发三个弹幕请求会抢带宽，起播明显变慢。
+            // 等**新视频真的起来了**再拉弹幕。
+            //
+            // 原来只看 time-pos > 0.05，但切换瞬间 time-pos 还是上一条的值，
+            // 条件立刻成立 → 视频还在建连接，三个 32 秒窗口的弹幕请求就打出去了，
+            // 直接抢走带宽（日志里 1.3 秒的加载延迟多半是这么来的）。
             int waited = 0;
-            while (!ct.IsCancellationRequested && (_mpv?.Position ?? 0) <= 0.05 && waited < 4000)
+            while (!ct.IsCancellationRequested && waited < 5000)
             {
-                await Task.Delay(200, ct);
-                waited += 200;
+                bool loaded = _fileLoadedFor == item.Id;
+                if (loaded && (_mpv?.Position ?? 0) > 0.05) break;
+                await Task.Delay(150, ct);
+                waited += 150;
             }
 
             while (!ct.IsCancellationRequested)
@@ -1656,6 +1667,7 @@ public partial class MainWindow : Window
         _switchTimer.Stop();
         _consecutiveFailures = 0;
         _restoredSession = false;      // 恢复的那条播起来了，之后就不算"恢复中"了
+        _fileLoadedFor = CurrentId;    // 弹幕从这一刻起才允许拉
         string source = _lastFromCache ? "已预取" : "网络";
         Dispatcher.BeginInvoke(() =>
             SetStatus(ms > 0 ? $"已加载（{source}），耗时 {ms}ms" : "已加载"));
@@ -1818,8 +1830,20 @@ public partial class MainWindow : Window
         TimeSpan gap = _emptyStreak > 0 ? TimeSpan.FromSeconds(20) : TimeSpan.FromMinutes(30);
         if (DateTime.Now - _lastHealthCheck < gap) return;
 
-        var session = _client.Session;
-        if (session?.IsLoggedIn != true)
+        // Session 在第一次请求之前是 null（启动时"接着上次看"这条路不拉数据）。
+        // 直接判 null 会把"还没加载"当成"没登录"，于是设置页出现
+        // "已登录"和"登录状态：未登录"同时显示的怪状。
+        DouyinSession session;
+        try
+        {
+            session = _client.Session ?? await _client.EnsureSessionAsync();
+        }
+        catch
+        {
+            return;      // 网络问题判断不了，保持原状态
+        }
+
+        if (!session.IsLoggedIn)
         {
             LoginHealth.Set(LoginHealth.State.Guest);
             return;

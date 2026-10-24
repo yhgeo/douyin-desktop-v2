@@ -179,8 +179,19 @@ public partial class SettingsWindow : Window
     {
         if (HealthText is null) return;
 
-        string expiry = SessionExpiry.Describe(_client.Session?.LoginCookies);
-        HealthText.Text = $"登录状态：{LoginHealth.Describe()}　·　{expiry}";
+        // 内存里的会话可能还没加载（启动后直接"接着上次看"不会拉数据），
+        // 拿磁盘上的那份兜底，避免把"还没加载"显示成"未登录"。
+        var session = _client.Session ?? DouyinDesktop.Core.Api.DouyinSession.Load();
+        bool logged = session?.IsLoggedIn == true;
+
+        // 有 Cookie 却显示"未登录"：健康检查在会话就绪前误判过。
+        // 以事实为准，别让同一屏同时出现"已登录"和"未登录"。
+        string health = logged && LoginHealth.Current == LoginHealth.State.Guest
+            ? "待检查"
+            : LoginHealth.Describe();
+
+        string expiry = SessionExpiry.Describe(session?.LoginCookies);
+        HealthText.Text = $"登录状态：{health}　·　{expiry}";
         HealthText.Foreground = LoginHealth.Current == LoginHealth.State.Expired
             ? new System.Windows.Media.SolidColorBrush(
                 System.Windows.Media.Color.FromRgb(0xFE, 0x2C, 0x55))
@@ -190,7 +201,8 @@ public partial class SettingsWindow : Window
 
     private void RefreshAccount()
     {
-        bool logged = _client.Session?.IsLoggedIn == true;
+        var session = _client.Session ?? DouyinDesktop.Core.Api.DouyinSession.Load();
+        bool logged = session?.IsLoggedIn == true;
 
         AccountStatus.Text = logged ? "已登录" : "未登录（游客态）";
         AccountStatus.Foreground = logged

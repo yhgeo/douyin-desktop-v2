@@ -1,0 +1,359 @@
+{
+  "version": 1,
+  "createdAt": "2026-10-24T18:00:20.3562671+00:00",
+  "updatedAt": "2026-10-24T18:00:20.363718+00:00",
+  "description": "Initial baseline created by 'slopwatch init' on 2026-10-24 18:00:20 UTC",
+  "entries": [
+    {
+      "hash": "cd4e3e75f2a8a8ae",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/AppLog.cs",
+      "lineNumber": 31,
+      "codeSnippet": "catch (IOException)\r\n        {\r\n            // 日志写不进去不能影响主流程\r\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3634003+00:00"
+    },
+    {
+      "hash": "6bce8e34ac7afe91",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/AppSettings.cs",
+      "lineNumber": 100,
+      "codeSnippet": "catch (IOException)\r\n        {\r\n            // 存不下不影响本次使用\r\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635366+00:00"
+    },
+    {
+      "hash": "16ef6dab9c78f0bc",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/DiagnoseWindow.xaml.cs",
+      "lineNumber": 189,
+      "codeSnippet": "catch (JsonException) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635452+00:00"
+    },
+    {
+      "hash": "51f882b93a550e2a",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/KeyMap.cs",
+      "lineNumber": 134,
+      "codeSnippet": "catch (Exception ex) when (ex is IOException or JsonException)\r\n        {\r\n            // 配置坏了就用默认值，不要让程序起不来\r\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635517+00:00"
+    },
+    {
+      "hash": "5a0252686cb1d361",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/KeyMap.cs",
+      "lineNumber": 151,
+      "codeSnippet": "catch (IOException)\r\n        {\r\n            // 存不下不影响本次使用\r\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635601+00:00"
+    },
+    {
+      "hash": "8eea431ba1ec65f9",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/MainWindow.xaml.cs",
+      "lineNumber": 480,
+      "codeSnippet": "catch { /* 已经在退出 */ }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635646+00:00"
+    },
+    {
+      "hash": "0a4afa6999b7d42e",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/MainWindow.xaml.cs",
+      "lineNumber": 774,
+      "codeSnippet": "catch { /* 轨道可能已经跟着上一条视频没了 */ }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635681+00:00"
+    },
+    {
+      "hash": "2d4a7fc960fd6098",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/MainWindow.xaml.cs",
+      "lineNumber": 818,
+      "codeSnippet": "catch (OperationCanceledException) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635712+00:00"
+    },
+    {
+      "hash": "a38356f494783cc2",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/MainWindow.xaml.cs",
+      "lineNumber": 1482,
+      "codeSnippet": "catch { /* 已经停了 */ }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635743+00:00"
+    },
+    {
+      "hash": "bd16052812a06d94",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/MainWindow.xaml.cs",
+      "lineNumber": 1612,
+      "codeSnippet": "catch { /* 预取失败就等播放时透传 */ }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635783+00:00"
+    },
+    {
+      "hash": "ccba57ad08c31e0a",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/MainWindow.xaml.cs",
+      "lineNumber": 1919,
+      "codeSnippet": "catch\n        {\n            // 网络问题不算登录失效，保持原状态\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635821+00:00"
+    },
+    {
+      "hash": "bc7e977059d0f5d7",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/MainWindow.xaml.cs",
+      "lineNumber": 1951,
+      "codeSnippet": "catch\n        {\n            // 取色失败就保持深灰底，不影响播放\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635854+00:00"
+    },
+    {
+      "hash": "869a0f823b1e79a4",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/MainWindow.xaml.cs",
+      "lineNumber": 2606,
+      "codeSnippet": "catch { /* 已经关了 */ }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635882+00:00"
+    },
+    {
+      "hash": "d4b4e8b575efc429",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/MainWindow.xaml.cs",
+      "lineNumber": 2612,
+      "codeSnippet": "catch { /* 收尾不抛 */ }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635909+00:00"
+    },
+    {
+      "hash": "5dfe69d915a791d9",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/MainWindow.xaml.cs",
+      "lineNumber": 2619,
+      "codeSnippet": "catch { /* 忽略 */ }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635948+00:00"
+    },
+    {
+      "hash": "79a923445bd02933",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/SettingsWindow.xaml.cs",
+      "lineNumber": 244,
+      "codeSnippet": "catch\r\n        {\r\n            // 网络问题判断不了就保持原样\r\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3635992+00:00"
+    },
+    {
+      "hash": "eb72a86b1bbbfb6e",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/TemplateFetcher.cs",
+      "lineNumber": 100,
+      "codeSnippet": "catch { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636029+00:00"
+    },
+    {
+      "hash": "a77e84bdd988feab",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/WebCookieSync.cs",
+      "lineNumber": 67,
+      "codeSnippet": "catch { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636154+00:00"
+    },
+    {
+      "hash": "5c033c1ef4ef774e",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.App/WebTestWindow.cs",
+      "lineNumber": 178,
+      "codeSnippet": "catch { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636223+00:00"
+    },
+    {
+      "hash": "962575bf1d0e4c9a",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/LastSession.cs",
+      "lineNumber": 65,
+      "codeSnippet": "catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)\n        {\n            // 存不下就算了，下次正常拉推荐\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.363627+00:00"
+    },
+    {
+      "hash": "f687954542269b90",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/LastSession.cs",
+      "lineNumber": 100,
+      "codeSnippet": "catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636304+00:00"
+    },
+    {
+      "hash": "6045d0f2389f4483",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/Api/DouyinClient.cs",
+      "lineNumber": 264,
+      "codeSnippet": "catch (JsonException)\n        {\n            // 结构变了就返回空，由上层报\"没拿到视频\"\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636353+00:00"
+    },
+    {
+      "hash": "1e645c469bcf50c0",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/Api/DouyinClient.cs",
+      "lineNumber": 1167,
+      "codeSnippet": "catch (JsonException) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636392+00:00"
+    },
+    {
+      "hash": "abb52772a5b422db",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/Api/DouyinSession.cs",
+      "lineNumber": 161,
+      "codeSnippet": "catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)\r\n        {\r\n            // 网络问题不致命：没有 ttwid 也常常能过，只是概率低一些\r\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636443+00:00"
+    },
+    {
+      "hash": "df0cff04f574a0b1",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/Api/DouyinSession.cs",
+      "lineNumber": 230,
+      "codeSnippet": "catch (IOException)\r\n        {\r\n            // 存不下就算了，下次重新注册\r\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636484+00:00"
+    },
+    {
+      "hash": "f0359c7e40fb8ac7",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/Api/PrefetchCache.cs",
+      "lineNumber": 114,
+      "codeSnippet": "catch (IOException) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636518+00:00"
+    },
+    {
+      "hash": "16afbb72c7c12908",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/Api/PrefetchCache.cs",
+      "lineNumber": 163,
+      "codeSnippet": "catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)\n        {\n            // 写不进去就算了，下次重新预取\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636566+00:00"
+    },
+    {
+      "hash": "6b7c24455d61d39e",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/Api/PrefetchCache.cs",
+      "lineNumber": 197,
+      "codeSnippet": "catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)\n        {\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636603+00:00"
+    },
+    {
+      "hash": "cfab8f774dd2e6d3",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/Api/PrefetchCache.cs",
+      "lineNumber": 220,
+      "codeSnippet": "catch (UnauthorizedAccessException) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636657+00:00"
+    },
+    {
+      "hash": "05db36c071a5f308",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/Api/VideoStreamProxy.cs",
+      "lineNumber": 101,
+      "codeSnippet": "catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)\n        {\n            // 预取失败不影响播放：真正播放时会走透传\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636709+00:00"
+    },
+    {
+      "hash": "6db9ef83d14edff7",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/Api/VideoStreamProxy.cs",
+      "lineNumber": 154,
+      "codeSnippet": "catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or OperationCanceledException)\n                {\n                    // 客户端提前断开（用户切走了）是常态，不算错误\n                }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636758+00:00"
+    },
+    {
+      "hash": "d32a1c85dd7c2a82",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Core/Api/VideoStreamProxy.cs",
+      "lineNumber": 158,
+      "codeSnippet": "catch { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636792+00:00"
+    },
+    {
+      "hash": "40ecfba7d19e7ee6",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Player/MpvController.cs",
+      "lineNumber": 186,
+      "codeSnippet": "catch { /* 已经退了 */ }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636887+00:00"
+    },
+    {
+      "hash": "fd6db23bccb02fa0",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Player/MpvController.cs",
+      "lineNumber": 459,
+      "codeSnippet": "catch\n        {\n            // quit 没回应就直接杀\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3636928+00:00"
+    },
+    {
+      "hash": "6ee449e863335b1b",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Player/MpvIpc.cs",
+      "lineNumber": 119,
+      "codeSnippet": "catch (OperationCanceledException) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.363699+00:00"
+    },
+    {
+      "hash": "9f53fecb079e1dab",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Player/MpvIpc.cs",
+      "lineNumber": 120,
+      "codeSnippet": "catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3637021+00:00"
+    },
+    {
+      "hash": "972a3268a1337d46",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Player/MpvIpc.cs",
+      "lineNumber": 179,
+      "codeSnippet": "catch { /* 收尾不抛 */ }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3637052+00:00"
+    },
+    {
+      "hash": "e1a41fef4b24f2b6",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.Player/MpvIpc.cs",
+      "lineNumber": 182,
+      "codeSnippet": "catch (IOException) { }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3637088+00:00"
+    },
+    {
+      "hash": "31fdd2fadf43e3bb",
+      "ruleId": "SW003",
+      "filePath": "src/DouyinDesktop.PlayerProbe/Program.cs",
+      "lineNumber": 52,
+      "codeSnippet": "catch { /* 忽略 */ }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-10-24T18:00:20.3637179+00:00"
+    }
+  ]
+}

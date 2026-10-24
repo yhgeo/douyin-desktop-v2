@@ -279,7 +279,45 @@ public sealed class VideoStreamProxy : IAsyncDisposable
         // CDN 忽略了 Range 返回 200：得自己跳过前面那段
         if (!partial && start > 0) await SkipAsync(src, start, ct);
 
+        // 从头发起的请求顺手攒下开头一段。
+        //
+        // 以前只有"预取下一条"会写缓存，**当前正在播的这条永远进不了缓存**，
+        // 于是每次启动"接着上次看"都要重新走网络（实测 file-loaded 1.08 秒）。
+        if (start == 0 && entry.HeadLength == 0)
+        {
+            await CopyAndCaptureHeadAsync(src, dst, entry, ct);
+            return;
+        }
+
         await src.CopyToAsync(dst, 64 * 1024, ct);
+    }
+
+    /// <summary>边转发给播放器，边把开头 <see cref="_prefetchBytes"/> 字节攒进内存并落盘。</summary>
+    private async Task CopyAndCaptureHeadAsync(
+        Stream src, Stream dst, StreamEntry entry, CancellationToken ct)
+    {
+        var head = new MemoryStream(_prefetchBytes);
+        byte[] buf = new byte[64 * 1024];
+
+        while (true)
+        {
+            int n = await src.ReadAsync(buf, ct);
+            if (n <= 0) break;
+
+            if (head.Length < _prefetchBytes)
+            {
+                int room = _prefetchBytes - (int)head.Length;
+                head.Write(buf, 0, Math.Min(n, room));
+            }
+
+            await dst.WriteAsync(buf.AsMemory(0, n), ct);
+        }
+
+        if (head.Length == 0) return;
+
+        entry.Head = head.ToArray();
+        entry.HeadLength = entry.Head.Length;
+        _cache?.Save(entry.AwemeId, entry.SourceUrl, entry.Head, entry.TotalLength, entry.ContentType);
     }
 
     private async Task CopyFromCdnAsync(

@@ -27,7 +27,7 @@ public sealed class PrefetchCache
 
     private const string Magic = "DYPF";
     private const int HeaderSizeBytes = 8;
-    private const int TrimEverySaves = 20;
+    private const int TrimEverySaves = 8;
 
     private readonly string _dir;
     private readonly long _maxBytes;
@@ -51,7 +51,11 @@ public sealed class PrefetchCache
         {
             Directory.CreateDirectory(target);
             var cache = new PrefetchCache(target, maxBytes, maxEntries);
-            cache.Trim();
+
+            // 清理扔后台：启动时同步遍历 + 删除上百个文件会拖慢窗口显示，
+            // 而缓存清理晚一两秒完全不影响播放（Trim 自己吞异常）。
+            _ = Task.Run(cache.Trim);
+
             return cache;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

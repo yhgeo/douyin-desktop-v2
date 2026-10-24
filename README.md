@@ -252,12 +252,24 @@ publish 出单文件 exe，然后只覆盖安装目录的 `DouyinDesktop.exe` / 
 
 程序正在运行的话 exe 会被占用，脚本会直接报错退出——先关掉程序再跑。
 
+### 改完代码先自检
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\check.ps1
+```
+
+编译 → 签名测试 → 偷懒代码扫描（slopwatch，只报相对基线**新增**的空 catch /
+禁用测试 / 抑制警告）→ 离线探针。全程不联网、不弹窗。
+
+加 `-Full` 会额外跑联网探针（凭据 → 推荐流 → 播放地址）。
+
 ---
 
 ## 项目结构
 
 ```
 douyin-desktop-v2/
+├─ DouyinDesktop.sln            解决方案（一次构建全部 6 个项目）
 ├─ src/
 │  ├─ DouyinDesktop.App/       界面（WPF）
 │  ├─ DouyinDesktop.Core/      签名 + 接口 + 数据模型 + 流代理
@@ -265,16 +277,18 @@ douyin-desktop-v2/
 │  ├─ DouyinDesktop.Tests/     签名校验（32 组 golden 向量）
 │  ├─ DouyinDesktop.Probe/     数据层探针
 │  └─ DouyinDesktop.PlayerProbe/ 播放器探针
-├─ docs/
+├─ docs/                       先看 docs/README.md（文档索引）
 │  ├─ 使用手册.md              面向使用者的完整说明
 │  ├─ 接口笔记.md              摸清的接口和踩过的坑
 │  ├─ 环境说明.md              装了哪些东西、能不能删
-│  └─ 目录结构.md              文件夹为什么这么分
+│  ├─ 目录结构.md              文件夹为什么这么分
+│  └─ 历史-Rust方案.md         初版选型（已作废，仅作历史记录）
 ├─ tools/golden/               签名测试向量
 └─ scripts/                    一键脚本
    ├─ env.ps1                  激活环境（临时加 PATH）
    ├─ setup.ps1                补齐缺的东西
    ├─ fetch-mpv.ps1            下载播放器
+   ├─ check.ps1                自检（编译 + 测试 + 偷懒代码扫描 + 离线探针）
    └─ deploy.ps1               发布并覆盖到本机安装目录
 ```
 
@@ -286,8 +300,8 @@ douyin-desktop-v2/
 
 - [接口笔记](docs/接口笔记.md)：推荐流 / 播放地址 / 评论 / 作者主页 / webSign 签名，
   以及 mpv IPC、WPF 嵌入、输入法这些坑
-- [PLAN.md](PLAN.md)：为什么走原生路线、为什么不加载网页
-  （技术栈部分写的是 Rust，已作废，仅作历史记录）
+- [历史-Rust方案](docs/历史-Rust方案.md)：初版选型（Rust + egui，**已作废**）。
+  只有"为什么走原生路线""为什么用 mpv"两节还有效，技术栈部分别照着做
 - [环境说明](docs/环境说明.md)：电脑上多了哪些东西、能不能删
 
 几个关键数据（2026-10 实测）：

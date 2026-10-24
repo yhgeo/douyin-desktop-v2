@@ -25,6 +25,34 @@ public sealed class DeviceProfile
     /// </summary>
     public string WebId { get; init; } = LoadOrCreateAppWebId();
 
+    /// <summary>
+    /// 浏览器真实 webid（`data/webid.txt`，登录窗口里从真实请求抄下来的）。
+    ///
+    /// 强校验接口（作者作品 / 作品详情）必须用它：服务端核对的是
+    /// "这个设备 + 这份 Cookie 真实用过哪个 webid"。
+    /// 拿不到时退回 <see cref="WebId"/>。
+    /// </summary>
+    public string BrowserWebId { get; init; } = LoadBrowserWebId();
+
+    /// <summary>强校验接口该用的 webid：有浏览器真实值就用它。</summary>
+    public string EffectiveWebId => BrowserWebId.Length > 0 ? BrowserWebId : WebId;
+
+    private static string LoadBrowserWebId()
+    {
+        try
+        {
+            string path = Path.Combine(DouyinPaths.DataDirectory, "webid.txt");
+            if (!File.Exists(path)) return "";
+
+            string saved = File.ReadAllText(path).Trim();
+            return saved.Length >= 15 ? saved : "";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return "";
+        }
+    }
+
     private static string LoadOrCreateAppWebId()
     {
         try
@@ -116,7 +144,7 @@ public sealed class DeviceProfile
     /// presented_ids 用来让服务端避开已推过的内容。
     /// </summary>
     public List<KeyValuePair<string, string>> FeedParams(
-        int count, string presentedIds, string msToken, int refreshIndex)
+        int count, string presentedIds, string msToken, int refreshIndex, string uifid = "")
     {
         string bv = BrowserVersion;
 
@@ -164,9 +192,14 @@ public sealed class DeviceProfile
             new("downlink", "10"),
             new("effective_type", "4g"),
             new("round_trip_time", "100"),
-            new("webid", WebId),
+            new("webid", EffectiveWebId),
             new("msToken", msToken),
         });
+
+        // uifid 是 secsdk 的设备指纹，浏览器**每个**接口都带。
+        // 推荐流之前漏了它，服务端就只能按"设备"推，拿不到账号级个性化。
+        if (!string.IsNullOrEmpty(uifid))
+            ps.Add(new("uifid", uifid));
 
         return ps;
     }
