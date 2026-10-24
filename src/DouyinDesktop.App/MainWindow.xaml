@@ -159,6 +159,10 @@
                                            TextWrapping="Wrap" Foreground="#D6D6DE" />
                             </ScrollViewer>
 
+                            <!-- 话题标签：方便看清这条属于什么，也方便去设置里配过滤规则 -->
+                            <TextBlock x:Name="TagText" Text="" FontSize="11" Margin="0,8,0,0"
+                                       TextWrapping="Wrap" Foreground="#6E6E7C" />
+
                             <StackPanel x:Name="StatsPanel" Orientation="Horizontal" Margin="0,0,0,18">
                                 <!-- 包一层 Border：TextBlock 没背景时点击热区只有字形那点大，
                                      鼠标经常点不中 -->

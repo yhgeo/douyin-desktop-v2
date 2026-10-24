@@ -31,6 +31,16 @@ public sealed class Aweme
     /// </summary>
     [JsonPropertyName("user_digged")] public int? UserDigged { get; init; }
 
+    /// <summary>文案里的话题标签（结构化）。覆盖率实测 84%，平均每条 3 个。</summary>
+    [JsonPropertyName("text_extra")] public List<TextExtra>? TextExtra { get; init; }
+
+    /// <summary>话题名（不含 #），给标签过滤用。</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> Hashtags =>
+        TextExtra is null
+            ? Array.Empty<string>()
+            : TextExtra.Where(x => x.HashtagName.Length > 0).Select(x => x.HashtagName).ToArray();
+
     /// <summary>能不能播：有 uri 才算。</summary>
     [JsonIgnore] public bool IsPlayable => !string.IsNullOrEmpty(Video?.PlayAddr?.Uri);
 
@@ -60,6 +70,17 @@ public sealed class Aweme
             return $"{total / 60}:{total % 60:00}";
         }
     }
+}
+
+/// <summary>
+/// 文案里的一段附加内容。type=1 是话题标签，hashtag_name 就是 # 后面的名字。
+/// </summary>
+public sealed class TextExtra
+{
+    [JsonPropertyName("hashtag_name")] public string HashtagName { get; init; } = "";
+    [JsonPropertyName("hashtag_id")] public string HashtagId { get; init; } = "";
+    [JsonPropertyName("type")] public int Type { get; init; }
+    [JsonPropertyName("is_commerce")] public bool IsCommerce { get; init; }
 }
 
 public sealed class Author

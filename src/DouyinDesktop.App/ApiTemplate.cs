@@ -43,6 +43,27 @@ public static class ApiTemplate
         }
     }
 
+    /// <summary>
+    /// 删掉某个路径的模板。
+    /// 用于"模板里的设备标识和当前不一致"——那种模板只会让请求返回空 body，
+    /// 清掉之后下次会自动重抓。
+    /// </summary>
+    public static void Clear(string path)
+    {
+        var map = Load();
+        if (!map.Remove(path)) return;
+
+        try
+        {
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(map));
+            AppLog.Write($"[模板] 已作废 {path}（设备标识不一致）");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("作废接口模板失败：" + ex.Message);
+        }
+    }
+
     private static Dictionary<string, string> Load()
     {
         if (_cache is not null) return _cache;

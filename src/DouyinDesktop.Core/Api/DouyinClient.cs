@@ -578,6 +578,9 @@ public sealed class DouyinClient : IDisposable
     /// <summary>模板缺失时去抓一次（参数是作品 id），返回是否抓到。</summary>
     public Func<string, Task<bool>>? CaptureTemplate { get; set; }
 
+    /// <summary>作废某个路径的模板（设备标识变了时调用，下次会自动重抓）。</summary>
+    public Action<string>? ClearTemplate { get; set; }
+
     /// <summary>
     /// 额外请求头（secsdk 的 `x-tt-session-dtrait` 之类），由 App 层注入。
     ///
@@ -610,6 +613,40 @@ public sealed class DouyinClient : IDisposable
     }
 
     /// <summary>用模板拼出请求 URL：替换 aweme_id / cursor / count / msToken，然后重签。</summary>
+    /// <summary>
+    /// 模板里的设备标识是否与当前一致。
+    ///
+    /// 只查 **webid** 和 **verifyFp**（s_v_web_id）——它们只在登录/清浏览器环境时才变。
+    /// **不能查 uifid**：服务端每次下发新的，用它判断会导致模板被频繁作废、每次重抓 8 秒。
+    /// </summary>
+    private bool TemplateMatchesDevice(string template, DouyinSession session)
+    {
+        string tplWebId = QueryParam(template, "webid");
+        string nowWebId = _profile.EffectiveWebId;
+        if (tplWebId.Length > 0 && nowWebId.Length > 0 && tplWebId != nowWebId) return false;
+
+        string tplSv = QueryParam(template, "verifyFp");
+        string nowSv = session.EffectiveSvWebId;
+        if (tplSv.Length > 0 && nowSv.Length > 0 && tplSv != nowSv) return false;
+
+        return true;
+    }
+
+    /// <summary>从完整 URL 里取某个 query 参数的值（取不到返回空串）。</summary>
+    private static string QueryParam(string url, string name)
+    {
+        int q = url.IndexOf('?');
+        if (q < 0) return "";
+
+        foreach (string part in url[(q + 1)..].Split('&'))
+        {
+            int eq = part.IndexOf('=');
+            if (eq <= 0) continue;
+            if (part.AsSpan(0, eq).SequenceEqual(name)) return part[(eq + 1)..];
+        }
+        return "";
+    }
+
     private string? BuildFromTemplate(string template, string awemeId, long cursor, int count,
         DouyinSession session, string? overrideParam = null, string? overrideValue = null)
     {
@@ -855,6 +892,18 @@ public sealed class DouyinClient : IDisposable
         // 自己拼怎么调都差一点（webid 换成浏览器的仍失败），照抄浏览器最稳。
         const string CommentPath = "/aweme/v1/web/comment/list/";
         string? tpl = GetTemplate?.Invoke(CommentPath);
+
+        // 模板是**抓取那一刻**的设备快照（webid / verifyFp 都在里面）。
+        // 设备变了还照抄旧值，就是"新 Cookie 配旧设备"——服务端返回空 body 且不报错。
+        // 这里直接作废重抓，让设备漂移能**自愈**，而不是等人发现评论没了再去改代码。
+        if (tpl is not null && !TemplateMatchesDevice(tpl, session))
+        {
+            Log?.Invoke("模板的设备标识与当前不一致，作废并重抓");
+            ClearTemplate?.Invoke(CommentPath);
+            tpl = null;
+            _lastCaptureAttempt = DateTime.MinValue;   // 允许立刻重抓，不等冷却
+        }
+
         if (tpl is null && CaptureTemplate is not null
             && DateTime.UtcNow - _lastCaptureAttempt > TimeSpan.FromMinutes(5))
         {

@@ -100,6 +100,7 @@ public partial class MainWindow : Window
         // 强校验接口走「浏览器模板」：平时不碰浏览器，模板缺失/失效才抓一次
         _client.GetTemplate = ApiTemplate.Get;
         _client.CaptureTemplate = id => TemplateFetcher.CaptureAsync(id);
+        _client.ClearTemplate = ApiTemplate.Clear;
         // secsdk 运行时头（x-tt-session-dtrait）：点赞这类写接口缺了会被静默丢弃
         _client.GetExtraHeaders = SecsdkHeaders.Get;
         _healthHandler = () => Dispatcher.BeginInvoke(UpdateExpiredBadge);
@@ -682,9 +683,22 @@ public partial class MainWindow : Window
                 elapsed = result.ElapsedMs;
             }
 
+            // 标签过滤：用户配了"只看/屏蔽"就在这里筛掉。
+            // 抖音标签覆盖率实测 84%，剩下 16% 没标签的，白名单模式下会被丢。
+            got = ApplyTagFilter(got);
+
             foreach (var a in got)
             {
                 if (_presented.Add(a.Id)) _items.Add(a);
+            }
+
+            // 一批全被筛掉：得说清楚，否则用户会以为"加载不出来"是程序坏了
+            var activeRule = TagRule.Parse(_settings.TagRules);
+            if (got.Count == 0 && !activeRule.IsEmpty)
+            {
+                PushStatus($"这一批 {elapsed}ms 全被标签规则筛掉了（{activeRule.Describe()}）");
+                SetStatus("标签过滤太严，这批没剩下内容 —— 去 设置 → 播放 放宽规则");
+                return;
             }
 
             PushStatus($"推荐流 +{got.Count} 条 / {elapsed}ms");
@@ -702,6 +716,18 @@ public partial class MainWindow : Window
         {
             _feedLoading = false;
         }
+    }
+
+    /// <summary>按设置里的标签规则过滤。规则为空时原样返回。</summary>
+    private IReadOnlyList<Aweme> ApplyTagFilter(IReadOnlyList<Aweme> items)
+    {
+        var rule = TagRule.Parse(_settings.TagRules);
+        if (rule.IsEmpty || items.Count == 0) return items;
+
+        var kept = items.Where(rule.Allows).ToList();
+        if (kept.Count < items.Count)
+            AppLog.Write($"[标签] 过滤掉 {items.Count - kept.Count} 条（剩 {kept.Count}）");
+        return kept;
     }
 
     /// <summary>
@@ -2065,6 +2091,14 @@ public partial class MainWindow : Window
 
         UpdateMetaLine(item, item.IpLabel);
         DescText.Text = string.IsNullOrWhiteSpace(item.Desc) ? "（无文案）" : item.Desc;
+
+        // 话题标签（实测 84% 的作品有），既是内容线索，也方便照着配过滤规则
+        var tags = item.Hashtags;
+        if (TagText is not null)
+        {
+            TagText.Text = tags.Count == 0 ? "" : string.Join("  ", tags.Select(t => "#" + t));
+            TagText.Visibility = tags.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        }
 
         // 固定高度里放不下就缩字号（14 → 13 → 12），配合滚动条
         DescText.FontSize = item.Desc.Length switch

@@ -41,6 +41,10 @@ public partial class SettingsWindow : Window
 
         DataPathText.Text = DouyinDesktop.Core.DouyinPaths.DataDirectory;
         ImageOnlyCheck.IsChecked = settings.ImageOnly;
+
+        // 标签过滤：先填文本（会触发一次 TextChanged，那里有 null guard）
+        if (TagRulesBox is not null) TagRulesBox.Text = settings.TagRules;
+        UpdateTagRulesHint();
         LoadDanmakuUi();
         RefreshAccount();
 
@@ -57,6 +61,31 @@ public partial class SettingsWindow : Window
     private void OnNavKeys(object sender, RoutedEventArgs e) => SwitchPage("keys");
     private void OnNavPlay(object sender, RoutedEventArgs e) => SwitchPage("play");
     private void OnNavAbout(object sender, RoutedEventArgs e) => SwitchPage("about");
+
+    /// <summary>
+    /// 标签过滤规则改了。
+    ///
+    /// ⚠️ WPF 在 XAML 解析阶段就会触发一次 TextChanged，那时构造函数里的字段
+    /// （_settings、其它命名控件）还是 null —— 必须 guard，否则设置窗口直接弹"出错了"。
+    /// </summary>
+    private void OnTagRulesChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_settings is null || TagRulesBox is null) return;
+
+        _settings.TagRules = TagRulesBox.Text;
+        _settings.Save();
+        UpdateTagRulesHint();
+    }
+
+    private void UpdateTagRulesHint()
+    {
+        if (TagRulesHint is null) return;
+
+        var rule = TagRule.Parse(TagRulesBox?.Text);
+        TagRulesHint.Text = rule.IsEmpty
+            ? "留空 = 不过滤，按抖音原样推荐"
+            : $"当前：{rule.Describe()}";
+    }
 
     private void OnImageOnlyChanged(object sender, RoutedEventArgs e)
     {
