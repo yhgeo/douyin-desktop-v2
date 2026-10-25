@@ -2758,11 +2758,14 @@ public partial class MainWindow : Window
         // 页面就是"已登录"，窗口一闪就关，抓回来还是原来那份 Cookie
         // —— 等于什么都没做，用户会以为"重新登录了但没变化"。
         var previous = _client.Session;
-        if (previous?.IsLoggedIn == true)
-        {
-            ClearWebViewProfile();
+        bool relogin = previous?.IsLoggedIn == true;
 
-            previous.LoginCookies = "";
+        if (relogin)
+        {
+            // **不要删浏览器目录**！那样 localStorage(webid) 和 ttwid 全丢，
+            // 每次重新登录都换一套设备标识，服务端要重新绑定，推荐会先准后泛。
+            // 只清登录 Cookie，交给 LoginWindow 在页面加载前做。
+            previous!.LoginCookies = "";
             previous.Uifid = "";
             previous.Save();
 
@@ -2771,7 +2774,7 @@ public partial class MainWindow : Window
             LoginHealth.Set(LoginHealth.State.Guest);
         }
 
-        var win = new LoginWindow { Owner = this };
+        var win = new LoginWindow(freshLogin: relogin) { Owner = this };
         win.ShowDialog();
 
         if (string.IsNullOrEmpty(win.Cookies))

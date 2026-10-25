@@ -22,15 +22,59 @@ public partial class LoginWindow : Window
     /// <summary>登录成功后抓到的整包 Cookie（"a=1; b=2"）；取消或失败为 null。</summary>
     public string? Cookies { get; private set; }
 
-    public LoginWindow()
+    private readonly bool _freshLogin;
+
+    /// <param name="freshLogin">
+    /// 重新登录时传 true：会清掉浏览器里的登录 Cookie，让二维码能正常显示。
+    /// **只清登录 Cookie，保留 ttwid / s_v_web_id / localStorage** ——
+    /// 以前是删整个 EBWebView 目录，设备标识全丢，每次重新登录都换设备。
+    /// </param>
+    public LoginWindow(bool freshLogin = false)
     {
         InitializeComponent();
+        _freshLogin = freshLogin;
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += OnTick;
 
         Loaded += OnLoaded;
         Closed += (_, _) => _timer.Stop();
+    }
+
+        /// <summary>
+    /// 只清登录相关的 Cookie，**保留 ttwid / s_v_web_id / localStorage**。
+    ///
+    /// 以前重新登录是删整个 EBWebView 目录：localStorage（webid）和 ttwid 全丢，
+    /// 每次登录都换一套设备标识 → 服务端要重新绑定 → 推荐短暂个性化后又降级，
+    /// 用户感觉"老是掉登录、老是变大众"。
+    /// </summary>
+    private static async Task ClearLoginCookiesAsync(Microsoft.Web.WebView2.Core.CoreWebView2 core)
+    {
+        string[] loginKeys =
+        {
+            "sessionid", "sid_guard", "sid_tt", "sid_ucp_v1", "uid_tt", "uid_tt_ss",
+            "passport", "odin_tt", "d_ticket", "sso", "ssid_ucp_v1", "session_tlb_tag",
+            "login_time", "has_biz_token", "is_staff_user", "n_mh",
+        };
+
+        try
+        {
+            var manager = core.CookieManager;
+            int removed = 0;
+
+            foreach (var c in await manager.GetCookiesAsync("https://www.douyin.com"))
+            {
+                if (!loginKeys.Any(k => c.Name.Contains(k, StringComparison.OrdinalIgnoreCase))) continue;
+                manager.DeleteCookie(c);
+                removed++;
+            }
+
+            AppLog.Write($"[登录] 已清 {removed} 个登录 Cookie（ttwid / s_v_web_id 保留）");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("[登录] 清 Cookie 失败：" + ex.Message);
+        }
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -112,6 +156,8 @@ public partial class LoginWindow : Window
                     OverlayHint.Text = args.WebErrorStatus.ToString();
                 }
             };
+
+            if (_freshLogin) await ClearLoginCookiesAsync(Web.CoreWebView2);
 
             OverlayText.Text = "正在打开抖音…";
             Web.CoreWebView2.Navigate("https://www.douyin.com/");
