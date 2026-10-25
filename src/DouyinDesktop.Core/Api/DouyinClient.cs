@@ -1511,6 +1511,108 @@ public sealed class DouyinClient : IDisposable
         return ((int)resp.StatusCode, body);
     }
 
+    /// <summary>
+    /// 精确复刻浏览器搜索请求（参数和头都照 Edge F12 复制出来的 cURL）。
+    ///
+    /// 和 <see cref="SearchRawAsync"/> 的区别：
+    ///   · 用 **a_bogus**（不是 x_bogus，之前被知乎文章误导了）
+    ///   · webid 用浏览器真实值（和我们 webid.txt 里的不一致）
+    ///   · 补齐 enable_history / disable_rs / need_filter_settings /
+    ///     list_type / pc_search_top_1_params 这 5 个参数
+    ///   · 头带上 sec-ch-ua 系列和 uifid
+    /// </summary>
+    public async Task<(int Status, string Body)> SearchRawAsync2(
+        string keyword, int offset = 0, CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+
+        // 与浏览器完全一致（cURL 里就是这个 UA 和 webid）
+        const string ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                          "(KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0";
+        // 先试自己的 webid（与 session.json 的 Cookie 配套）；
+        // 想试浏览器的值就改成 "7548817309171861034"
+        string webId = _profile.EffectiveWebId;
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("search_channel", "aweme_video_web"),
+            new("enable_history", "1"),
+            new("keyword", keyword),
+            new("search_source", "normal_search"),
+            new("query_correct_type", "1"),
+            new("is_filter_search", "0"),
+            new("from_group_id", ""),
+            new("disable_rs", "0"),
+            new("offset", offset.ToString()),
+            new("count", "16"),
+            new("need_filter_settings", "1"),
+            new("list_type", "single"),
+            new("pc_search_top_1_params", "{\"enable_ai_search_top_1\":1}"),
+            new("update_version_code", "170400"),
+            new("pc_client_type", "1"),
+            new("pc_libra_divert", "Windows"),
+            new("support_h265", "1"),
+            new("support_dash", "1"),
+            new("cpu_core_num", "16"),
+            new("version_code", "170400"),
+            new("version_name", "17.4.0"),
+            new("cookie_enabled", "true"),
+            new("screen_width", "2048"),
+            new("screen_height", "1152"),
+            new("browser_language", "zh-CN"),
+            new("browser_platform", "Win32"),
+            new("browser_name", "Edge"),
+            new("browser_version", "155.0.0.0"),
+            new("browser_online", "true"),
+            new("engine_name", "Blink"),
+            new("engine_version", "155.0.0.0"),
+            new("os_name", "Windows"),
+            new("os_version", "10"),
+            new("device_memory", "16"),
+            new("platform", "PC"),
+            new("downlink", "10"),
+            new("effective_type", "4g"),
+            new("round_trip_time", "100"),
+            new("webid", webId),
+        };
+
+        string uifid = session.EffectiveUifid;
+        if (!string.IsNullOrEmpty(uifid)) ps.Add(new("uifid", uifid));
+        ps.Add(new("msToken", session.MsToken));
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+        query += $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                 $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
+
+        string url = "https://www.douyin.com/aweme/v1/web/search/item/?" + query;
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.TryAddWithoutValidation("Cookie", session.CookieHeader);
+        req.Headers.TryAddWithoutValidation("User-Agent", ua);
+        req.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
+        req.Headers.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9");
+        req.Headers.TryAddWithoutValidation("Referer",
+            $"https://www.douyin.com/search/{Uri.EscapeDataString(keyword)}?type=video");
+        req.Headers.TryAddWithoutValidation("priority", "u=1, i");
+        req.Headers.TryAddWithoutValidation("sec-ch-ua",
+            "\"Microsoft Edge\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"");
+        req.Headers.TryAddWithoutValidation("sec-ch-ua-mobile", "?0");
+        req.Headers.TryAddWithoutValidation("sec-ch-ua-platform", "\"Windows\"");
+        req.Headers.TryAddWithoutValidation("sec-fetch-dest", "empty");
+        req.Headers.TryAddWithoutValidation("sec-fetch-mode", "cors");
+        req.Headers.TryAddWithoutValidation("sec-fetch-site", "same-origin");
+        if (!string.IsNullOrEmpty(uifid))
+            req.Headers.TryAddWithoutValidation("uifid", uifid);
+
+        using var resp = await _http.SendAsync(req, ct);
+        string body = await resp.Content.ReadAsStringAsync(ct);
+        return ((int)resp.StatusCode, body);
+    }
+
     // ================= 请求头 =================
 
     /// <summary>

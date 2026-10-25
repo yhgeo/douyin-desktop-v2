@@ -26,6 +26,9 @@ public partial class App : Application
         // --capture-search=关键词：屏幕外打开搜索页，抓真实搜索请求（URL + 全部头）
         if (e.Args.FirstOrDefault(a => a.StartsWith("--capture-search=", StringComparison.Ordinal)) is { } cs)
         {
+            // 抓包窗口不是 MainWindow，默认的 OnLastWindowClose 会让它一关就整个应用退出
+            // （表现就是"窗口闪退"）。改成显式退出，由 RunCaptureSearch 自己 Shutdown。
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
             RunCaptureSearch(cs["--capture-search=".Length..]);
             return;
         }

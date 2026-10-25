@@ -113,14 +113,23 @@ public static class SearchCapture
             Grid.SetRow(web, 1);
             grid.Children.Add(web);
 
+            // 手动算主屏中心：CenterScreen 在多显示器下可能落到副屏，
+            // 用户会以为"没打开"。再加 Topmost，免得被主窗口盖住。
+            var work = SystemParameters.WorkArea;
+            const double w = 1280, h = 860;
+
             host = new Window
             {
-                Width = 1280,
-                Height = 900,
+                Width = w,
+                Height = h,
+                Left = work.Left + (work.Width - w) / 2,
+                Top = work.Top + (work.Height - h) / 2,
                 Title = "抖音搜索抓包 — 操作完点上方按钮",
                 Background = System.Windows.Media.Brushes.Black,
                 Content = grid,
-                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                WindowState = WindowState.Normal,
+                ShowInTaskbar = true,
             };
 
             host.Closed += (_, _) =>
@@ -129,14 +138,31 @@ public static class SearchCapture
                 done.TrySetResult(captured.Count > 0);
             };
 
+            // 抓包窗口当 MainWindow，避免某些 WPF 内部逻辑拿到 null
+            if (Application.Current is not null) Application.Current.MainWindow = host;
+
             host.Show();
+            host.Activate();
+
+            AppLog.Write($"[抓搜索] 窗口已显示：位置 {host.Left:0},{host.Top:0} 尺寸 {host.Width:0}x{host.Height:0}，" +
+                         $"工作区 {work.Width:0}x{work.Height:0}");
 
             var env = await CoreWebView2Environment.CreateAsync(null, dir,
                 new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = "--no-sandbox --disable-gpu" });
+            AppLog.Write("[抓搜索] WebView2 环境就绪");
+
             await web.EnsureCoreWebView2Async(env);
+            AppLog.Write("[抓搜索] WebView2 初始化完成");
 
             var core = web.CoreWebView2;
             core.Settings.AreDevToolsEnabled = false;
+
+            // 页面很重，WebView2 的渲染进程可能挂掉——记下来，别只是"窗口没了"
+            core.ProcessFailed += (_, e) =>
+                AppLog.Write($"[抓搜索] WebView2 进程失败：{e.ProcessFailedKind}");
+
+            core.NavigationCompleted += (_, e) =>
+                AppLog.Write($"[抓搜索] 导航完成：{(e.IsSuccess ? "成功" : "失败 " + e.WebErrorStatus)}");
 
             core.AddWebResourceRequestedFilter("*aweme/v1/web/*", CoreWebView2WebResourceContext.All);
             core.WebResourceRequested += (_, e) =>
@@ -160,6 +186,7 @@ public static class SearchCapture
             };
 
             core.Navigate($"https://www.douyin.com/search/{Uri.EscapeDataString(keyword)}?type=video");
+            AppLog.Write("[抓搜索] 已导航到搜索页");
 
             // 用户自己关窗口；兜底超时防止忘在那儿
             await Task.WhenAny(done.Task, Task.Delay(TimeSpan.FromSeconds(timeoutSeconds)));

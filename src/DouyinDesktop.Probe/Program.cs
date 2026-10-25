@@ -473,6 +473,52 @@ if (args.Length > 0 && args[0] == "feedpres")
     return 0;
 }
 
+// 精确复刻浏览器搜索请求：dotnet run --project src/DouyinDesktop.Probe -- search2 美女
+//
+// 参数表来自用户从 Edge F12 复制的真实 cURL。关键三点：
+//   1. 用的是 **a_bogus**（不是 x_bogus，知乎那篇文章误导了）
+//   2. webid 是浏览器的 7548817309171861034，和我们 webid.txt 里的不一样
+//   3. 比我们之前多 5 个参数：enable_history / disable_rs / need_filter_settings /
+//      list_type / pc_search_top_1_params
+if (args.Length > 0 && args[0] == "search2")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    string kw = args.Length > 1 ? args[1] : "美女";
+
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var (status, body) = await c.SearchRawAsync2(kw);
+
+    Console.WriteLine($"\n=== 精确复刻 ===  HTTP {status}  {body.Length} 字节");
+    Console.WriteLine("  " + body[..Math.Min(300, body.Length)].Replace("\n", " "));
+
+    if (body.Length > 2 && body.TrimStart()[0] == '{')
+    {
+        using var doc = JsonDocument.Parse(body);
+        if (doc.RootElement.TryGetProperty("status_code", out var sc))
+            Console.WriteLine($"  status_code = {sc}");
+
+        if (doc.RootElement.TryGetProperty("data", out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            int n = 0;
+            foreach (var node in arr.EnumerateArray())
+            {
+                if (!node.TryGetProperty("aweme_info", out var ai)) continue;
+                n++;
+                if (n <= 8)
+                {
+                    string nick = ai.TryGetProperty("author", out var au) && au.TryGetProperty("nickname", out var nn)
+                        ? nn.GetString() ?? "" : "";
+                    Console.WriteLine($"    @{nick}");
+                }
+            }
+            Console.WriteLine($"  → {n} 条作品");
+        }
+    }
+    return 0;
+}
+
 // 两个推荐接口各自连续拉，看谁会退化成"同一批大众视频"
 // dotnet run --project src/DouyinDesktop.Probe -- feedmix
 if (args.Length > 0 && args[0] == "feedmix")
