@@ -42,6 +42,8 @@
                             Style="{StaticResource NavButton}" Click="OnNavKeys" />
                     <Button x:Name="NavTaste" Content="推荐倾向"
                             Style="{StaticResource NavButton}" Click="OnNavTaste" />
+                    <Button x:Name="NavBackup" Content="备份"
+                            Style="{StaticResource NavButton}" Click="OnNavBackup" />
                     <Button x:Name="NavPlay" Content="播放"
                             Style="{StaticResource NavButton}" Click="OnNavPlay" />
                     <Button x:Name="NavAbout" Content="关于"
@@ -203,6 +205,63 @@
                                 <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,16,0,0"
                                            TextWrapping="Wrap" LineHeight="18"
                                            Text="提示：多跑几次结果会更稳。同一批里出现「仅某一个号占三成以上」时，说明这一屏其实是被单个账号刷屏，不代表整体倾向。" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+
+            <!-- 备份页 -->
+            <Grid x:Name="PageBackup" Grid.Column="1" Visibility="Collapsed">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="28,26,28,24">
+                        <TextBlock Text="备份" FontSize="15" FontWeight="SemiBold" />
+
+                        <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,14,0,0">
+                            <StackPanel>
+                                <TextBlock Text="为什么不用下载视频" FontSize="13"
+                                           Foreground="{StaticResource TextBrush}" />
+                                <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,8,0,0"
+                                           TextWrapping="Wrap" LineHeight="19"
+                                           Text="视频文件动辄几十上百 MB，几百条就是几十 GB，而且会过期。&#10;备份只存「作品 ID」和「视频 ID」——这两个是永久标识。以后想看，用 ID 重新取一次播放地址就行，几毫秒的事。&#10;网页链接也是永久的：只要作品没被作者删掉，点开就能看。&#10;唯一的失效场景是作者删了作品，那种情况谁都救不回来。" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="会存下来的内容" FontSize="13"
+                                           Foreground="{StaticResource TextBrush}" />
+                                <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,8,0,0"
+                                           TextWrapping="Wrap" LineHeight="19"
+                                           Text="作品 ID / 视频 ID / 网页链接 / 文案 / 发布时间&#10;作者昵称、uid、sec_uid / 点赞·评论·分享·收藏数&#10;时长、分辨率、封面地址 / 话题标签、平台标签 / 背景音乐" />
+                                <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,8,0,0"
+                                           TextWrapping="Wrap" LineHeight="19"
+                                           Text="⚠ 抖音不返回「收藏时间」，只能按接口给的顺序（大致从新到旧）排列。" />
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                            <Button x:Name="BackupRunBtn" Content="备份我的收藏" Padding="16,6" FontSize="12"
+                                    Cursor="Hand" BorderThickness="0"
+                                    Background="#FE2C55" Foreground="White"
+                                    Click="OnRunBackup" />
+                            <TextBlock x:Name="BackupStatus" VerticalAlignment="Center" Margin="14,0,0,0"
+                                       FontSize="11" Foreground="#7A8AA8" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <Border x:Name="BackupResult" Visibility="Collapsed"
+                                Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,14,0,0">
+                            <StackPanel>
+                                <TextBlock x:Name="BackupSummary" FontSize="13" TextWrapping="Wrap"
+                                           LineHeight="20" Foreground="{StaticResource TextBrush}" />
+                                <TextBlock x:Name="BackupPath" FontSize="11" Foreground="#5A5A66"
+                                           Margin="0,8,0,0" TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                    <Button Content="打开备份目录" Style="{StaticResource LinkButton}"
+                                            Click="OnOpenBackupDir" />
+                                    <Button Content="打开卡片墙" Style="{StaticResource LinkButton}"
+                                            Margin="18,0,0,0" Click="OnOpenBackupHtml" />
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                     </StackPanel>

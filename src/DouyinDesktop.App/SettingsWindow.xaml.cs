@@ -62,8 +62,136 @@ public partial class SettingsWindow : Window
     private void OnNavAccount(object sender, RoutedEventArgs e) => SwitchPage("account");
     private void OnNavKeys(object sender, RoutedEventArgs e) => SwitchPage("keys");
     private void OnNavTaste(object sender, RoutedEventArgs e) => SwitchPage("taste");
+    private void OnNavBackup(object sender, RoutedEventArgs e) => SwitchPage("backup");
     private void OnNavPlay(object sender, RoutedEventArgs e) => SwitchPage("play");
     private void OnNavAbout(object sender, RoutedEventArgs e) => SwitchPage("about");
+
+    // ================= 备份 =================
+
+    private DateTime _backupStartedAt = DateTime.MinValue;
+    private string _lastBackupDir = "";
+
+    private async void OnRunBackup(object sender, RoutedEventArgs e)
+    {
+        if ((DateTime.Now - _backupStartedAt).TotalSeconds < 3) return;
+        _backupStartedAt = DateTime.Now;
+
+        BackupRunBtn.IsEnabled = false;
+        BackupStatus.Text = "准备中…";
+
+        try
+        {
+            if (_client.Session?.IsLoggedIn != true)
+            {
+                BackupStatus.Text = "需要先登录（设置 → 账号）";
+                return;
+            }
+
+            string collectsId = await _client.GetDefaultCollectsIdAsync();
+            if (collectsId.Length == 0)
+            {
+                BackupStatus.Text = "没有找到收藏夹";
+                return;
+            }
+
+            // 翻到没有下一页为止。上限 60 页（1200 条）纯粹是防死循环，
+            // 正常收藏夹远到不了。
+            var all = new List<DouyinDesktop.Core.Models.Aweme>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            string cursor = "0";
+
+            for (int page = 0; page < 60; page++)
+            {
+                BackupStatus.Text = $"正在读取收藏… 已收 {all.Count} 条";
+
+                var r = await _client.GetCollectedAsync(collectsId, cursor, 20);
+                if (!r.Success)
+                {
+                    if (all.Count == 0)
+                    {
+                        BackupStatus.Text = "读取失败：" + r.Message;
+                        return;
+                    }
+                    break;      // 已经拿到一部分，就别把整次备份废掉
+                }
+
+                foreach (var a in r.Items)
+                    if (seen.Add(a.Id)) all.Add(a);
+
+                if (!r.HasMore || r.NextCursor.Length == 0 || r.NextCursor == cursor) break;
+                cursor = r.NextCursor;
+                await Task.Delay(700);      // 限速，别把接口打成风控
+            }
+
+            if (all.Count == 0)
+            {
+                BackupStatus.Text = "一条都没读到";
+                return;
+            }
+
+            BackupStatus.Text = $"正在生成文件（{all.Count} 条）…";
+
+            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            string dir = System.IO.Path.Combine(
+                DouyinDesktop.Core.DouyinPaths.DataDirectory, "backup", $"collect-{stamp}");
+            System.IO.Directory.CreateDirectory(dir);
+
+            var file = DouyinDesktop.Core.BackupExporter.Build(all, "collect");
+
+            // 不带 BOM：CSV 里已经手动加了（Excel 需要），JSON/HTML 加了反而有杂字符
+            var utf8 = new System.Text.UTF8Encoding(false);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "collect.json"),
+                DouyinDesktop.Core.BackupExporter.ToJson(file), utf8);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "collect.csv"),
+                DouyinDesktop.Core.BackupExporter.ToCsv(file), utf8);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "index.html"),
+                DouyinDesktop.Core.BackupExporter.ToHtml(file), utf8);
+
+            _lastBackupDir = dir;
+
+            long bytes = new System.IO.DirectoryInfo(dir).GetFiles().Sum(f => f.Length);
+            int imageCount = all.Count(x => x.IsImagePost);
+
+            BackupResult.Visibility = Visibility.Visible;
+            BackupSummary.Text = $"已备份 {all.Count} 条" +
+                                 (imageCount > 0 ? $"（其中图集 {imageCount} 条）" : "") +
+                                 $" · 共 {bytes / 1024.0:0} KB";
+            BackupPath.Text = dir;
+
+            BackupStatus.Text = "完成";
+            AppLog.Write($"[备份] {all.Count} 条 → {dir}");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("[备份] 失败：" + ex);
+            BackupStatus.Text = "备份失败：" + ex.Message;
+        }
+        finally
+        {
+            BackupRunBtn.IsEnabled = true;
+        }
+    }
+
+    private void OnOpenBackupDir(object sender, RoutedEventArgs e)
+    {
+        if (_lastBackupDir.Length == 0) return;
+        try { System.Diagnostics.Process.Start("explorer.exe", _lastBackupDir); }
+        catch (Exception ex) { BackupStatus.Text = "打不开：" + ex.Message; }
+    }
+
+    private void OnOpenBackupHtml(object sender, RoutedEventArgs e)
+    {
+        if (_lastBackupDir.Length == 0) return;
+        string html = System.IO.Path.Combine(_lastBackupDir, "index.html");
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(html)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex) { BackupStatus.Text = "打不开：" + ex.Message; }
+    }
 
     // ================= 推荐倾向 =================
 
@@ -608,12 +736,14 @@ public partial class SettingsWindow : Window
         NavAccount.Tag = page == "account" ? "active" : null;
         NavKeys.Tag = page == "keys" ? "active" : null;
         NavTaste.Tag = page == "taste" ? "active" : null;
+        NavBackup.Tag = page == "backup" ? "active" : null;
         NavPlay.Tag = page == "play" ? "active" : null;
         NavAbout.Tag = page == "about" ? "active" : null;
 
         PageAccount.Visibility = page == "account" ? Visibility.Visible : Visibility.Collapsed;
         PageKeys.Visibility = page == "keys" ? Visibility.Visible : Visibility.Collapsed;
         PageTaste.Visibility = page == "taste" ? Visibility.Visible : Visibility.Collapsed;
+        PageBackup.Visibility = page == "backup" ? Visibility.Visible : Visibility.Collapsed;
         PagePlay.Visibility = page == "play" ? Visibility.Visible : Visibility.Collapsed;
         PageAbout.Visibility = page == "about" ? Visibility.Visible : Visibility.Collapsed;
     }

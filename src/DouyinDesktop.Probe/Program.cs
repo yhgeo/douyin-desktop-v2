@@ -2149,6 +2149,70 @@ if (args.Length > 0 && args[0] == "favfields")
     return 0;
 }
 
+// 完整备份一遍收藏，验证三种格式的产物：dotnet run --project src/DouyinDesktop.Probe -- backup
+if (args.Length > 0 && args[0] == "backup")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    string cid = await c.GetDefaultCollectsIdAsync();
+    if (cid.Length == 0) { Console.WriteLine("没有收藏夹（未登录？）"); return 1; }
+    Console.WriteLine($"collects_id = {cid}\n");
+
+    var all = new List<DouyinDesktop.Core.Models.Aweme>();
+    var seen = new HashSet<string>(StringComparer.Ordinal);
+    string cursor = "0";
+
+    for (int page = 0; page < 60; page++)
+    {
+        var r = await c.GetCollectedAsync(cid, cursor, 20);
+        if (!r.Success) { Console.WriteLine($"第 {page + 1} 页失败：{r.Message}"); break; }
+
+        foreach (var a in r.Items) if (seen.Add(a.Id)) all.Add(a);
+        Console.Write($"\r  第 {page + 1} 页… 累计 {all.Count} 条");
+
+        if (!r.HasMore || r.NextCursor.Length == 0 || r.NextCursor == cursor) break;
+        cursor = r.NextCursor;
+        await Task.Delay(700);
+    }
+    Console.WriteLine();
+
+    if (all.Count == 0) { Console.WriteLine("一条都没读到"); return 1; }
+
+    var file = BackupExporter.Build(all, "collect");
+    string dir = Path.Combine(Path.GetTempPath(), "dy-backup-" + DateTime.Now.ToString("HHmmss"));
+    Directory.CreateDirectory(dir);
+
+    var utf8 = new System.Text.UTF8Encoding(false);
+    File.WriteAllText(Path.Combine(dir, "collect.json"), BackupExporter.ToJson(file), utf8);
+    File.WriteAllText(Path.Combine(dir, "collect.csv"), BackupExporter.ToCsv(file), utf8);
+    File.WriteAllText(Path.Combine(dir, "index.html"), BackupExporter.ToHtml(file), utf8);
+
+    var di = new DirectoryInfo(dir);
+    Console.WriteLine($"\n导出 {all.Count} 条 → {dir}");
+    foreach (var f in di.GetFiles())
+        Console.WriteLine($"  {f.Name,-14} {f.Length / 1024.0,8:0.0} KB");
+
+    // 抽查：CSV 行数、HTML 卡片数、JSON 里的永久标识
+    int csvLines = File.ReadAllLines(Path.Combine(dir, "collect.csv")).Length;
+    string html = File.ReadAllText(Path.Combine(dir, "index.html"));
+    int cards = System.Text.RegularExpressions.Regex.Matches(html, "class=\"card\"").Count;
+    Console.WriteLine($"\n校验：CSV {csvLines} 行（行数会多于条数——文案里的换行是合法的多行单元格），" +
+                      $"HTML {cards} 张卡片");
+
+    var head = file.Items.FirstOrDefault();
+    if (head is not null)
+    {
+        Console.WriteLine($"首条：{head.AwemeId}");
+        Console.WriteLine($"  网页 {head.WebUrl}");
+        Console.WriteLine($"  视频ID {(head.VideoId.Length > 0 ? head.VideoId : "(空)")}");
+        Console.WriteLine($"  封面 {(head.CoverUrl.Length > 0 ? "有" : "无")}  平台标签 [{string.Join("/", head.OfficialTags)}]");
+    }
+
+    return 0;
+}
+
 // 登录态 vs 游客态的关注流：内容一样就说明服务端根本没认登录
 // dotnet run --project src/DouyinDesktop.Probe -- followguest
 if (args.Length > 0 && args[0] == "followguest")
