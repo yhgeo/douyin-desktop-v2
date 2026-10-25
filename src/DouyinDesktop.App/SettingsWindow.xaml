@@ -40,6 +40,8 @@
                             Style="{StaticResource NavButton}" Click="OnNavAccount" />
                     <Button x:Name="NavKeys" Content="快捷键"
                             Style="{StaticResource NavButton}" Click="OnNavKeys" />
+                    <Button x:Name="NavTaste" Content="推荐倾向"
+                            Style="{StaticResource NavButton}" Click="OnNavTaste" />
                     <Button x:Name="NavPlay" Content="播放"
                             Style="{StaticResource NavButton}" Click="OnNavPlay" />
                     <Button x:Name="NavAbout" Content="关于"
@@ -142,6 +144,69 @@
                                    Foreground="#7A8AA8" />
                     </DockPanel>
                 </Border>
+            </Grid>
+
+            <!-- 推荐倾向页 -->
+            <Grid x:Name="PageTaste" Grid.Column="1" Visibility="Collapsed">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="28,26,28,24">
+                        <TextBlock Text="推荐倾向" FontSize="15" FontWeight="SemiBold" />
+                        <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,8,0,0"
+                                   TextWrapping="Wrap" LineHeight="18"
+                                   Text="拉 40 条推荐视频，逐条读取平台标签（抖音自己的三级分类，如「美食 → 美食探店 → 餐厅探店」），看平台现在正在推给你什么。&#10;大约需要半分钟——平台标签只在详情接口里，每条要多花 0.6 秒。拿不到平台标签的会退回用作者标签。" />
+
+                        <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                            <Button x:Name="TasteRunBtn" Content="开始分析" Padding="16,6" FontSize="12"
+                                    Cursor="Hand" BorderThickness="0"
+                                    Background="#FE2C55" Foreground="White"
+                                    Click="OnRunTaste" />
+                            <TextBlock x:Name="TasteStatus" VerticalAlignment="Center" Margin="14,0,0,0"
+                                       FontSize="11" Foreground="#7A8AA8" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <!-- 采样数量：平台标签要逐条取详情，条数直接决定等多久 -->
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <TextBlock Text="采样数量" FontSize="11" Foreground="#5A5A66"
+                                       VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <Button x:Name="TasteCount20" Content="20 条" CommandParameter="20"
+                                    Style="{StaticResource SegButton}" Click="OnTasteCountClick" />
+                            <Button x:Name="TasteCount40" Content="40 条" CommandParameter="40"
+                                    Style="{StaticResource SegButton}" Click="OnTasteCountClick" />
+                            <Button x:Name="TasteCount60" Content="60 条" CommandParameter="60"
+                                    Style="{StaticResource SegButton}" Click="OnTasteCountClick" />
+                            <Button x:Name="TasteCount100" Content="100 条" CommandParameter="100"
+                                    Style="{StaticResource SegButton}" Click="OnTasteCountClick" />
+                            <TextBlock x:Name="TasteCountHint" FontSize="11" Foreground="#5A5A66"
+                                       VerticalAlignment="Center" Margin="10,0,0,0" />
+                        </StackPanel>
+
+                        <Border x:Name="TasteResult" Visibility="Collapsed"
+                                Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,16,0,0">
+                            <StackPanel>
+                                <TextBlock x:Name="TasteSummary" FontSize="13" TextWrapping="Wrap"
+                                           LineHeight="20" Foreground="{StaticResource TextBrush}" />
+                                <TextBlock x:Name="TasteMeta" FontSize="11" Foreground="#5A5A66"
+                                           Margin="0,8,0,0" TextWrapping="Wrap" />
+
+                                <TextBlock Text="主题分布" FontSize="12" Foreground="#8C8C99"
+                                           Margin="0,18,0,8" />
+                                <StackPanel x:Name="TasteThemes" />
+
+                                <TextBlock Text="高频标签" FontSize="12" Foreground="#8C8C99"
+                                           Margin="0,18,0,8" />
+                                <WrapPanel x:Name="TasteTags" />
+
+                                <TextBlock Text="作者集中度" FontSize="12" Foreground="#8C8C99"
+                                           Margin="0,18,0,8" />
+                                <StackPanel x:Name="TasteAuthors" />
+
+                                <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,16,0,0"
+                                           TextWrapping="Wrap" LineHeight="18"
+                                           Text="提示：多跑几次结果会更稳。同一批里出现「仅某一个号占三成以上」时，说明这一屏其实是被单个账号刷屏，不代表整体倾向。" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
             </Grid>
 
             <!-- 播放页 -->

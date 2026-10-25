@@ -36,7 +36,9 @@ public sealed class KeyMap
         //   · 登录：设置 → 账号 里有扫码入口
         new("refresh",    "换一批推荐",   Key.None,   Array.Empty<Key>()),
         new("login",      "登录",         Key.None,   Array.Empty<Key>()),
-        new("author",     "作者主页 / 回推荐", Key.None, Array.Empty<Key>()),
+        // 从 v3 起默认 U：喜欢/收藏页的「主页」显示的是封面墙，
+        // 想看当前作者的作品只能靠这个键，没有它就等于看不到。
+        new("author",     "作者主页 / 回推荐", Key.U, Array.Empty<Key>()),
     };
 
     private readonly Dictionary<string, Key> _keys = new();
@@ -45,9 +47,9 @@ public sealed class KeyMap
     // 老配置里存着旧默认（U / R / L，或者用户自己改过的别的键），
     // 留着会让人觉得"改了没生效"，所以升级时统一清一次，之后就按用户的选择来。
     private const string VersionKey = "__v";
-    private const string CurrentVersion = "2";
+    private const string CurrentVersion = "3";
 
-    private static readonly HashSet<string> UnboundInV2 = new() { "refresh", "login", "author" };
+    private static readonly HashSet<string> UnboundInV2 = new() { "refresh", "login" };
 
     public event Action? Changed;
 
@@ -130,7 +132,16 @@ public sealed class KeyMap
                 if (Enum.TryParse<Key>(name, out var key)) map._keys[id] = key;
             }
 
-            if (legacy) map.Save();     // 迁移只做一次
+            if (legacy)
+            {
+                // v2 迁移时把 author 清成了"未绑定"。v3 起它必须有键
+                // （喜欢/收藏页里「主页」是封面墙，作者主页只剩这一条路），
+                // 所以**只在用户没绑过的情况下**补上默认 U，不覆盖自定义键。
+                if (map._keys.TryGetValue("author", out var ak) && ak == Key.None)
+                    map._keys["author"] = Key.U;
+
+                map.Save();     // 迁移只做一次
+            }
         }
         catch (Exception ex) when (ex is IOException or JsonException)
         {

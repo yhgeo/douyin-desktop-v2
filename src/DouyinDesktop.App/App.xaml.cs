@@ -23,6 +23,14 @@ public partial class App : Application
             return;
         }
 
+        // --capture-fav：屏幕外打开自己的主页（喜欢 tab），抓 favorite 请求 + sec_uid
+        if (e.Args.Contains("--capture-fav"))
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            RunCaptureFav();
+            return;
+        }
+
         // --capture-search=关键词：屏幕外打开搜索页，抓真实搜索请求（URL + 全部头）
         if (e.Args.FirstOrDefault(a => a.StartsWith("--capture-search=", StringComparison.Ordinal)) is { } cs)
         {
@@ -48,6 +56,23 @@ public partial class App : Application
 
         MainWindow = win;
         win.Show();
+    }
+
+    /// <summary>屏幕外打开自己的主页，抓喜欢接口 + 自己的 sec_uid。</summary>
+    private async void RunCaptureFav()
+    {
+        try
+        {
+            AppLog.Write("[喜欢] 开始抓取");
+            bool ok = await FavoriteFetcher.CaptureAsync();
+            AppLog.Write(ok ? "[喜欢] 完成" : "[喜欢] 失败");
+            Shutdown(ok ? 0 : 1);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("[喜欢] 异常：" + ex);
+            Shutdown(1);
+        }
     }
 
     /// <summary>屏幕外打开一次搜索页，抓真实搜索请求。</summary>

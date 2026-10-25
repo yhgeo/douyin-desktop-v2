@@ -34,11 +34,19 @@ public partial class MainWindow : Window
         public List<Aweme> Items { get; } = new();
         public HashSet<string> Presented { get; } = new();
         public int Index { get; set; } = -1;
+
+        /// <summary>分页游标（喜欢是毫秒时间戳、收藏是整数，都从响应里取）。</summary>
+        public string Cursor { get; set; } = "0";
+
+        /// <summary>还有没有下一页。</summary>
+        public bool HasMore { get; set; } = true;
     }
 
     private readonly FeedContext _recommendFeed = new();
     private readonly FeedContext _followFeed = new();
     private readonly FeedContext _authorFeed = new();
+    private readonly FeedContext _likesFeed = new();
+    private readonly FeedContext _collectFeed = new();
     private FeedContext _feed = null!;
 
     // 用属性包一层，原有代码里的 _items / _index / _presented 全部不用改
@@ -46,8 +54,48 @@ public partial class MainWindow : Window
     private int _index { get => _feed.Index; set => _feed.Index = value; }
     private HashSet<string> _presented => _feed.Presented;
     private bool _useScrollFeed;
+
+    /// <summary>
+    /// 当前在哪个流。**互斥，用一个枚举管住**——以前是 _followMode / _authorMode
+    /// 两个 bool，加"喜欢/收藏"就会变成四个 bool 互相打架（漏设一个就串流）。
+    /// 下面几个属性是对外接口，现有赋值代码不用改。
+    /// </summary>
+    private enum FeedKind { Recommend, Follow, Author, Likes, Collect }
+    private FeedKind _kind = FeedKind.Recommend;
+
     /// <summary>当前是不是「关注」页（只刷关注的人）。</summary>
-    private bool _followMode;
+    private bool _followMode
+    {
+        get => _kind == FeedKind.Follow;
+        set
+        {
+            if (value) _kind = FeedKind.Follow;
+            else if (_kind == FeedKind.Follow) _kind = FeedKind.Recommend;
+        }
+    }
+
+    /// <summary>当前是不是「喜欢」页（自己点过赞的）。</summary>
+    private bool _likesMode
+    {
+        get => _kind == FeedKind.Likes;
+        set
+        {
+            if (value) _kind = FeedKind.Likes;
+            else if (_kind == FeedKind.Likes) _kind = FeedKind.Recommend;
+        }
+    }
+
+    /// <summary>当前是不是「收藏」页。</summary>
+    private bool _collectMode
+    {
+        get => _kind == FeedKind.Collect;
+        set
+        {
+            if (value) _kind = FeedKind.Collect;
+            else if (_kind == FeedKind.Collect) _kind = FeedKind.Recommend;
+        }
+    }
+
     private int _refreshIndex = 2;
 
     // 图集：图片走单独的 HttpClient，缓存最近看过的几十张
@@ -68,7 +116,15 @@ public partial class MainWindow : Window
     private Rect _boundsBeforeMaximize;
     private bool _adjustingState;
     /// <summary>当前列表是不是某个作者的作品（此时不再自动补推荐流，否则会混在一起）。</summary>
-    private bool _authorMode;
+    private bool _authorMode
+    {
+        get => _kind == FeedKind.Author;
+        set
+        {
+            if (value) _kind = FeedKind.Author;
+            else if (_kind == FeedKind.Author) _kind = FeedKind.Recommend;
+        }
+    }
     private bool _muted;
     /// <summary>启动时传给 mpv 的音量。目前没有音量 UI，固定 100（系统音量自己调）。</summary>
     private int _volume = 100;
@@ -606,13 +662,67 @@ public partial class MainWindow : Window
                 _presented.Clear();
                 _index = -1;
                 _filteredCount = 0;
+                // 游标也要一起回零，否则"重新加载"会从上次的位置继续
+                _feed.Cursor = "0";
+                _feed.HasMore = true;
             }
 
-            SetStatus("正在获取推荐…");
+            SetStatus(_likesMode ? "正在读取你的喜欢…"
+                    : _collectMode ? "正在读取收藏…"
+                    : _followMode ? "正在读取关注…"
+                    : "正在挑选视频…");
             IReadOnlyList<Aweme> got;
             long elapsed = 0;
 
-            if (_followMode)
+            if (_likesMode || _collectMode)
+            {
+                // 喜欢/收藏都是"我自己"的数据，游客态拿不到
+                if (_client.Session?.IsLoggedIn != true)
+                {
+                    _likesMode = false;
+                    _collectMode = false;
+                    _feed = _recommendFeed;
+                    UpdateModeLabel();
+                    SetStatus($"{(_likesMode ? "喜欢" : "收藏")}需要先登录：设置 → 账号 → 扫码登录");
+                    return;
+                }
+
+                string cursor = reset ? "0" : _feed.Cursor;
+                PagedResult page;
+
+                if (_likesMode)
+                {
+                    string secUid = await _client.GetSelfSecUidAsync();
+                    if (secUid.Length == 0)
+                    {
+                        SetStatus("拿不到自己的账号信息，登录可能已失效（设置 → 账号 里能看到状态）");
+                        return;
+                    }
+                    page = await _client.GetLikedAsync(secUid, cursor, _settings.FeedBatchSize);
+                }
+                else
+                {
+                    string collectsId = await _client.GetDefaultCollectsIdAsync();
+                    if (collectsId.Length == 0)
+                    {
+                        SetStatus("没有找到收藏夹（可能未登录，或者确实没收藏过）");
+                        return;
+                    }
+                    page = await _client.GetCollectedAsync(collectsId, cursor, _settings.FeedBatchSize);
+                }
+
+                if (!page.Success)
+                {
+                    SetStatus($"加载失败：{page.Message}");
+                    return;
+                }
+
+                _feed.Cursor = page.NextCursor;
+                _feed.HasMore = page.HasMore;
+                elapsed = page.ElapsedMs;
+                got = page.Items;
+            }
+            else if (_followMode)
             {
                 // 关注流走 follow/feed，结构是 {cursor, data:[...]}，
                 // 而且**必须登录**（游客态 data 是空的）
@@ -790,16 +900,29 @@ public partial class MainWindow : Window
                 return;
             }
 
-            PushStatus($"推荐流 +{got.Count} 条 / {elapsed}ms");
+            // 技术数字只进日志；界面上说人话
+            PushStatus($"{ModeLabel.Text} +{got.Count} 条 / {elapsed}ms");
+            SetStatus($"{ModeLabel.Text} · 已加载 {_items.Count} 条（{elapsed / 1000.0:0.0} 秒）");
 
             if (_index < 0 && _items.Count > 0)
                 await PlayIndexAsync(0);
             else
                 UpdateIndexLabel();
+
+            // 喜欢/收藏：补货之后封面墙也要跟着长，否则永远停在第 20 条
+            if ((_likesMode || _collectMode) && ProfileList.ItemsSource is not null)
+            {
+                ProfileList.ItemsSource = null;
+                ProfileList.ItemsSource = _items;
+                ProfileCount.Text = $"{_items.Count} 条 · 点封面直接播";
+                SyncProfileSelection();
+            }
         }
         catch (Exception ex)
         {
-            SetStatus("获取异常：" + ex.Message);
+            // 堆栈必须进日志——界面上只给一句人话，光看"Object reference..."没法排查
+            AppLog.Write("加载失败：" + ex);
+            SetStatus("这次没加载出来：" + ex.Message);
         }
         finally
         {
@@ -979,11 +1102,89 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task LeaveAuthorAsync()
     {
-        _authorMode = false;
-        _followMode = false;
+        // 必须直接置枚举：只把 _authorMode / _followMode 设 false 的话，
+        // 从「喜欢」「收藏」进来时枚举还停在原处，标签和列表就对不上了。
+        _kind = FeedKind.Recommend;
         await SwitchFeedAsync(_recommendFeed, "推荐");
         SwitchTab(SideTab.Detail);
         SetStatus("已回到推荐");
+    }
+
+    // ================= 喜欢 / 收藏 / 关注 =================
+
+    private async void OnLikesClick(object sender, RoutedEventArgs e)
+        => await EnterSideFeedAsync(FeedKind.Likes);
+
+    private async void OnCollectClick(object sender, RoutedEventArgs e)
+        => await EnterSideFeedAsync(FeedKind.Collect);
+
+    private async void OnFollowClick(object sender, RoutedEventArgs e)
+        => await EnterSideFeedAsync(FeedKind.Follow);
+
+    private async void OnRecommendClick(object sender, RoutedEventArgs e)
+    {
+        if (_kind == FeedKind.Recommend) return;
+        await LeaveAuthorAsync();
+    }
+
+    /// <summary>
+    /// 从标题栏切到「喜欢 / 收藏 / 关注」。
+    /// 再点一次同一个 = 回推荐（和按 U 的直觉一致）。
+    /// </summary>
+    private async Task EnterSideFeedAsync(FeedKind kind)
+    {
+        if (_feedLoading) return;
+
+        if (_kind == kind)
+        {
+            await LeaveAuthorAsync();
+            return;
+        }
+
+        // 先判断登录：这三个都是"我"的数据，游客态没意义
+        if (_client.Session?.IsLoggedIn != true)
+        {
+            SetStatus("需要先登录：设置 → 账号 → 扫码登录");
+            return;
+        }
+
+        _kind = kind;
+
+        var (target, label) = kind switch
+        {
+            FeedKind.Likes => (_likesFeed, "喜欢"),
+            FeedKind.Collect => (_collectFeed, "收藏"),
+            _ => (_followFeed, "关注"),
+        };
+
+        AppLog.Write($"切到「{label}」");
+        await SwitchFeedAsync(target, label);
+
+        // 喜欢/收藏用「作者主页」那种封面墙展示：三列缩略图，点哪条播哪条，
+        // 比一条条划更适合"翻自己的收藏"这种场景。
+        if ((kind == FeedKind.Likes || kind == FeedKind.Collect) && _items.Count > 0)
+        {
+            ShowMineWall(label, _items);
+            SwitchTab(SideTab.Profile);
+        }
+    }
+
+    /// <summary>
+    /// 把「我的喜欢 / 我的收藏」铺到封面墙上（和作者主页同一套界面）。
+    /// </summary>
+    private void ShowMineWall(string label, IReadOnlyList<Aweme> items)
+    {
+        // 清掉作者身份：这不是某个作者的作品，别和 _profileCache / _profileSecUid 混
+        _profileSecUid = "";
+        ProfileName.Text = label;
+        ProfileAvatar.Source = null;
+
+        // List 不是 ObservableCollection，同一个实例重新赋值才能触发刷新
+        ProfileList.ItemsSource = null;
+        ProfileList.ItemsSource = items;
+
+        ProfileCount.Text = $"{items.Count} 条 · 点封面直接播";
+        SyncProfileSelection();
     }
 
     // ================= 弹幕 =================
@@ -1143,6 +1344,8 @@ public partial class MainWindow : Window
     {
         // 作者主页模式下不补推荐流——混进来就不是"这个人的作品"了
         if (_feedLoading || _authorMode) return;
+        // 喜欢/收藏是按游标翻页的，翻到底就别再请求了（否则会一直重复要最后一页）
+        if ((_likesMode || _collectMode) && !_feed.HasMore) return;
         // 补货只要几条就够，别按"凑 10 条"来（那是首次加载的标准）
         if (_items.Count - _index <= 6)
             _ = LoadFeedAsync(target: 3);
@@ -1208,9 +1411,11 @@ public partial class MainWindow : Window
 
         if (!item.IsPlayable && !force)
         {
-            // 既不是视频也不是图集：跳过，避免卡住
+            // 不可播是常态（已删除 / 仅 App 可见 / 直播回放），
+            // 界面上不用逐条喊，写日志就够了，免得刷屏吓人。
             PushStatus($"跳过不可播条目 {item.Id}");
             if (index < _items.Count - 1) { await PlayIndexAsync(index + 1); return; }
+            SetStatus("这一段都是不可播的内容，换一条吧");
             return;
         }
 
@@ -1220,13 +1425,13 @@ public partial class MainWindow : Window
 
         if (_mpv is null)
         {
-            SetStatus("等待播放器…");
+            SetStatus("播放器正在启动，稍等一下…");
             return;
         }
 
         if (string.IsNullOrEmpty(item.Video?.PlayAddr?.Uri))
         {
-            SetStatus("这条没有可播地址");
+            SetStatus("这条拿不到播放地址（可能已删除，或只在手机端能看）");
             return;
         }
 
@@ -1414,7 +1619,8 @@ public partial class MainWindow : Window
     /// </summary>
     private void SaveSessionIfNeeded()
     {
-        if (_authorMode || _followMode) return;
+        // 只有推荐流值得恢复：关注/作者/喜欢/收藏都是临时的，下次也没法原样恢复
+        if (_kind != FeedKind.Recommend) return;
         if (_index < 0 || _items.Count == 0) return;
         if ((DateTime.UtcNow - _lastSessionSave).TotalSeconds < 2) return;
 
@@ -1468,7 +1674,10 @@ public partial class MainWindow : Window
         ProfilePane.Visibility = tab == SideTab.Profile ? Visibility.Visible : Visibility.Collapsed;
 
         if (tab == SideTab.Comments) _ = LoadCommentsAsync(reset: _commentAwemeId != CurrentId);
-        if (tab == SideTab.Profile) _ = LoadProfileAsync();
+
+        // 喜欢/收藏模式下，「主页」显示的是"我的喜欢/收藏"封面墙，
+        // 不能再去拉当前作者的其它作品，否则刚填好的列表立刻被覆盖。
+        if (tab == SideTab.Profile && !_likesMode && !_collectMode) _ = LoadProfileAsync();
     }
 
     private async Task LoadCommentsAsync(bool reset)
@@ -1626,8 +1835,10 @@ public partial class MainWindow : Window
 
         int idx = _items.IndexOf(item);
 
-        // 主页列表和当前流不是一回事：先把这批作品灌进「作者主页」流
-        if (idx < 0)
+        // 主页列表和当前流不是一回事：先把这批作品灌进「作者主页」流。
+        // **但喜欢/收藏模式下不能这么做**——那会把"我的喜欢"变成"某人的主页"，
+        // 而且封面墙上点的本来就是当前流里的东西。
+        if (idx < 0 && !_likesMode && !_collectMode)
         {
             _authorMode = true;
             _followMode = false;
@@ -1648,14 +1859,28 @@ public partial class MainWindow : Window
     /// <summary>右下角显示当前在哪个流。</summary>
     private void UpdateModeLabel()
     {
-        string text = _authorMode ? "作者主页" : _followMode ? "关注" : "推荐";
+        string text = _authorMode ? "作者主页"
+            : _likesMode ? "喜欢"
+            : _collectMode ? "收藏"
+            : _followMode ? "关注"
+            : "推荐";
         ModeLabel.Text = text;
 
         // 非推荐流换个底色，一眼能看出来
         ModeBadge.Background = new System.Windows.Media.SolidColorBrush(
-            _authorMode || _followMode
+            _authorMode || _followMode || _likesMode || _collectMode
                 ? System.Windows.Media.Color.FromRgb(0x3A, 0x1D, 0x26)
                 : System.Windows.Media.Color.FromRgb(0x1F, 0x1F, 0x28));
+
+        // 标题栏按钮跟着高亮，省得用户不知道自己在哪一页
+        var accent = new System.Windows.Media.SolidColorBrush(
+            System.Windows.Media.Color.FromRgb(0xFE, 0x2C, 0x55));
+        var normal = new System.Windows.Media.SolidColorBrush(
+            System.Windows.Media.Color.FromRgb(0x9A, 0x9A, 0xA6));
+        if (NavRecommend is not null) NavRecommend.Foreground = _kind == FeedKind.Recommend ? accent : normal;
+        if (NavLikes is not null) NavLikes.Foreground = _likesMode ? accent : normal;
+        if (NavCollect is not null) NavCollect.Foreground = _collectMode ? accent : normal;
+        if (NavFollow is not null) NavFollow.Foreground = _followMode ? accent : normal;
     }
 
     private void OnToggleReplies(object sender, RoutedEventArgs e)
@@ -2254,7 +2479,10 @@ public partial class MainWindow : Window
         AuthorText.Text = "@" + item.AuthorName;
 
         UpdateMetaLine(item, item.IpLabel);
-        DescText.Text = string.IsNullOrWhiteSpace(item.Desc) ? "（无文案）" : item.Desc;
+
+        // Desc 也可能是 JSON null（服务端偶尔给），直接 .Length 会炸
+        string desc = item.Desc ?? "";
+        DescText.Text = string.IsNullOrWhiteSpace(desc) ? "（无文案）" : desc;
 
         // 标签：作者自己加的话题（列表里就有）+ 平台分类（只有详情接口给，异步补）
         _officialTags = item.OfficialTags;
@@ -2262,7 +2490,7 @@ public partial class MainWindow : Window
         _ = FetchOfficialTagsAsync(item);
 
         // 固定高度里放不下就缩字号（14 → 13 → 12），配合滚动条
-        DescText.FontSize = item.Desc.Length switch
+        DescText.FontSize = desc.Length switch
         {
             > 220 => 12,
             > 120 => 13,
@@ -2321,11 +2549,13 @@ public partial class MainWindow : Window
         // 画布尺寸固定铺满，不随作品宽高比变化——宽高比交给 mpv 做黑边
         UpdateIndexLabel();
 
-        // 正在看评论/主页的话，切作品就跟着换
+        // 正在看评论/主页的话，切作品就跟着换。
+        // **但喜欢/收藏模式例外**：那里的「主页」是"我的喜欢/收藏"封面墙，
+        // 切下一条视频时只更新高亮，不能重新拉当前作者的主页（否则列表被换掉）。
         if (_sideTab == SideTab.Comments) _ = LoadCommentsAsync(reset: true);
         if (_sideTab == SideTab.Profile)
         {
-            _ = LoadProfileAsync();
+            if (!_likesMode && !_collectMode) _ = LoadProfileAsync();
             SyncProfileSelection();
         }
     }
@@ -2502,9 +2732,33 @@ public partial class MainWindow : Window
                     break;
 
                 case "author":
-                    // U 是个开关：在作者流里回推荐，否则切到「主页」Tab
-                    if (_authorMode) await LeaveAuthorAsync();
-                    else SwitchTab(SideTab.Profile);
+                    // U 是个开关：在作者流里回推荐，否则切到「主页」Tab。
+                    //
+                    // 喜欢/收藏模式下「主页」显示的是"我的喜欢/收藏"封面墙，
+                    // 想看**当前这条的作者**作品，必须走这里显式切过去。
+                    if (_authorMode)
+                    {
+                        await LeaveAuthorAsync();
+                    }
+                    else if (_likesMode || _collectMode)
+                    {
+                        var cur = _index >= 0 && _index < _items.Count ? _items[_index] : null;
+                        if (cur?.Author?.SecUid is { Length: > 0 } su)
+                        {
+                            _likesMode = false;
+                            _collectMode = false;
+                            await LoadAuthorPostsAsync(su, cur.AuthorName);
+                            SwitchTab(SideTab.Profile);
+                        }
+                        else
+                        {
+                            SetStatus("拿不到这条的作者信息");
+                        }
+                    }
+                    else
+                    {
+                        SwitchTab(SideTab.Profile);
+                    }
                     break;
 
                 case "taggroup":
@@ -2830,6 +3084,18 @@ public partial class MainWindow : Window
         session.Save();
 
         _client.ResetLoginExpiredFlag();
+        // 换账号了：缓存的 sec_uid / 收藏夹 id 都是上一个人的，必须清
+        _client.ClearSelfIdentity();
+        _likesFeed.Items.Clear();
+        _likesFeed.Presented.Clear();
+        _likesFeed.Index = -1;
+        _likesFeed.Cursor = "0";
+        _likesFeed.HasMore = true;
+        _collectFeed.Items.Clear();
+        _collectFeed.Presented.Clear();
+        _collectFeed.Index = -1;
+        _collectFeed.Cursor = "0";
+        _collectFeed.HasMore = true;
         _browserSyncTried = false;                    // 新凭据，允许以后再同步一次
         _emptyStreak = 0;                             // 空计数必须清零，否则一登录就被判过期
         _commentCooldownUntil = DateTime.MinValue;    // 限流冷却也清掉

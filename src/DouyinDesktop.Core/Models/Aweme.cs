@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace DouyinDesktop.Core.Models;
@@ -45,14 +46,23 @@ public sealed class Aweme
     public IReadOnlyList<string> OfficialTags =>
         VideoTag is null
             ? Array.Empty<string>()
-            : VideoTag.Where(x => x.TagName.Length > 0).Select(x => x.TagName).ToArray();
+            : VideoTag.Where(x => x is not null && !string.IsNullOrEmpty(x.TagName))
+                      .Select(x => x.TagName).ToArray();
 
-    /// <summary>话题名（不含 #），给标签过滤用。</summary>
+    /// <summary>
+    /// 话题名（不含 #），给标签过滤用。
+    ///
+    /// ⚠️ 两处都得判空，缺一个就是 NullReferenceException，而调用方是标签过滤——
+    /// 表现是"收藏整个打不开"，日志里只有一句 Object reference（2026-10-26 踩过两次）：
+    ///   1. 数组元素本身可能是 null（`[null, {...}]`）
+    ///   2. **`hashtag_name` 可能是 JSON null**，会把属性默认值 `""` 覆盖成 null
+    /// </summary>
     [JsonIgnore]
     public IReadOnlyList<string> Hashtags =>
         TextExtra is null
             ? Array.Empty<string>()
-            : TextExtra.Where(x => x.HashtagName.Length > 0).Select(x => x.HashtagName).ToArray();
+            : TextExtra.Where(x => x is not null && !string.IsNullOrEmpty(x.HashtagName))
+                       .Select(x => x.HashtagName).ToArray();
 
     /// <summary>能不能播：有 uri 才算。</summary>
     [JsonIgnore] public bool IsPlayable => !string.IsNullOrEmpty(Video?.PlayAddr?.Uri);
@@ -99,7 +109,17 @@ public sealed class TextExtra
     [JsonPropertyName("hashtag_name")] public string HashtagName { get; init; } = "";
     [JsonPropertyName("hashtag_id")] public string HashtagId { get; init; } = "";
     [JsonPropertyName("type")] public int Type { get; init; }
-    [JsonPropertyName("is_commerce")] public bool IsCommerce { get; init; }
+    /// <summary>
+    /// 是不是商业推广。
+    ///
+    /// 服务端有时给 true/false，有时给 0/1，所以配了宽松转换器。
+    /// **不能用 JsonElement 接**：它持有 JsonDocument 的引用，文档一释放就失效，
+    /// 保存现场时序列化会抛 `Operation is not valid due to the current state of the object`
+    /// （2026-10-26 关闭程序弹窗就是这么来的）。
+    /// </summary>
+    [JsonPropertyName("is_commerce")]
+    [JsonConverter(typeof(LenientBoolConverter))]
+    public bool IsCommerce { get; init; }
 }
 
 public sealed class Author
@@ -191,4 +211,41 @@ public sealed class MusicInfo
 
     /// <summary>音频直链。图集没有视频流，但可以播这个当背景音乐。</summary>
     [JsonIgnore] public string AudioUrl => PlayUrl?.First ?? "";
+}
+
+/// <summary>
+/// 宽松的布尔转换器：`true` / `false` / `1` / `0` / `"1"` / `"true"` 都认。
+///
+/// 为什么需要：抖音有些字段（比如 `text_extra[].is_commerce`）同一批数据里
+/// 既有布尔又有数字，定义成 bool 会让**整条作品反序列化失败**——
+/// 实测 20 条收藏里 6 条因此被丢掉，表现是"接口有 1.7MB 却说没有内容"。
+///
+/// 为什么不用 JsonElement 兜：它持有 JsonDocument 的引用，文档释放后取值就抛
+/// `Operation is not valid due to the current state of the object`，
+/// 而 Aweme 会被存进「接着上次看」的现场文件，序列化时直接崩（关闭程序弹窗的根因）。
+/// </summary>
+public sealed class LenientBoolConverter : JsonConverter<bool>
+{
+    public override bool Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.True: return true;
+            case JsonTokenType.False: return false;
+            case JsonTokenType.Number:
+                return reader.TryGetInt64(out long n) ? n != 0 : false;
+            case JsonTokenType.String:
+                string? s = reader.GetString();
+                return s is "1" or "true" or "True" or "TRUE";
+            case JsonTokenType.Null:
+            case JsonTokenType.None:
+                return false;
+            default:
+                reader.Skip();
+                return false;
+        }
+    }
+
+    public override void Write(Utf8JsonWriter writer, bool value, JsonSerializerOptions options)
+        => writer.WriteBooleanValue(value);
 }

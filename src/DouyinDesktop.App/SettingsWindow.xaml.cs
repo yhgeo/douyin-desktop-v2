@@ -45,6 +45,8 @@ public partial class SettingsWindow : Window
 
         InitTagGroups(settings);
 
+        RefreshTasteCountButtons();
+
         LoadDanmakuUi();
         RefreshAccount();
 
@@ -59,8 +61,274 @@ public partial class SettingsWindow : Window
 
     private void OnNavAccount(object sender, RoutedEventArgs e) => SwitchPage("account");
     private void OnNavKeys(object sender, RoutedEventArgs e) => SwitchPage("keys");
+    private void OnNavTaste(object sender, RoutedEventArgs e) => SwitchPage("taste");
     private void OnNavPlay(object sender, RoutedEventArgs e) => SwitchPage("play");
     private void OnNavAbout(object sender, RoutedEventArgs e) => SwitchPage("about");
+
+    // ================= 推荐倾向 =================
+
+    /// <summary>
+    /// 每批拉多少。平台标签只有详情接口给（推荐流里 100% 是 null），
+    /// 所以每条都要额外调一次详情，实测 **602ms/条**。
+    /// 具体采样总量由用户选（20/40/60/100），见 <see cref="_tasteCount"/>。
+    /// </summary>
+    private const int TastePerBatch = 20;
+
+    /// <summary>用户选的采样条数。</summary>
+    private int _tasteCount = 40;
+
+    private void OnTasteCountClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button b) return;
+        string raw = b.CommandParameter?.ToString() ?? "";
+        if (!int.TryParse(raw, out int n) || n <= 0) return;
+
+        _tasteCount = n;
+        RefreshTasteCountButtons();
+    }
+
+    private void RefreshTasteCountButtons()
+    {
+        foreach (var (btn, val) in new[]
+                 {
+                     (TasteCount20, 20), (TasteCount40, 40),
+                     (TasteCount60, 60), (TasteCount100, 100),
+                 })
+        {
+            if (btn is null) continue;
+            btn.Tag = _tasteCount == val ? "active" : null;
+        }
+
+        // 估时：拉列表约 2 秒/批 + 详情 0.62 秒/条
+        double sec = _tasteCount / (double)TastePerBatch * 2 + _tasteCount * 0.62;
+        if (TasteCountHint is not null) TasteCountHint.Text = $"约 {sec:0} 秒";
+    }
+
+    /// <summary>重入保护用时间戳而不是 bool——异常时 bool 不释放，按钮就永远点不动了。</summary>
+    private DateTime _tasteStartedAt = DateTime.MinValue;
+
+    private async void OnRunTaste(object sender, RoutedEventArgs e)
+    {
+        // 分析期间按钮是禁用的，这里只是防"双击的第二次已经在队列里"。
+        // 别按总时长算——用户可能选 100 条要跑一分钟。
+        if ((DateTime.Now - _tasteStartedAt).TotalSeconds < 3) return;
+        _tasteStartedAt = DateTime.Now;
+
+        TasteRunBtn.IsEnabled = false;
+        TasteStatus.Text = "准备中…";
+
+        try
+        {
+            var collected = new List<DouyinDesktop.Core.Models.Aweme>();
+            var seenIds = new List<string>();
+            int failed = 0;
+
+            int batches = Math.Max(1, (int)Math.Ceiling(_tasteCount / (double)TastePerBatch));
+
+            for (int i = 0; i < batches; i++)
+            {
+                int want = Math.Min(TastePerBatch, _tasteCount - collected.Count);
+                if (want <= 0) break;
+
+                TasteStatus.Text = $"正在拉取推荐… 第 {i + 1}/{batches} 批，已收 {collected.Count} 条";
+
+                var result = await _client.GetFeedAsync(want, seenIds);
+                if (result.Success)
+                {
+                    collected.AddRange(result.Items);
+                    seenIds.AddRange(result.Items.Select(x => x.Id));
+                }
+                else
+                {
+                    failed++;
+                    AppLog.Write($"[倾向] 第 {i + 1} 批失败：{result.Message}");
+                }
+
+                if (i < batches - 1) await Task.Delay(1200);
+            }
+
+            // presented_ids 只能减少重复，不能保证没有——再按 id 去一次
+            var distinct = collected
+                .GroupBy(x => x.Id, StringComparer.Ordinal)
+                .Select(g => g.First())
+                .ToList();
+
+            if (distinct.Count == 0)
+            {
+                TasteStatus.Text = failed > 0
+                    ? "一条都没拉到，接口可能被风控挡了（稍后再试）"
+                    : "一条都没拉到";
+                return;
+            }
+
+            // ---- 逐条取详情，把平台标签（video_tag）补齐 ----
+            //
+            // 推荐流里 video_tag 一条都没有（实测 29 条全 null），
+            // 只能靠详情接口。平台标签是抖音自己的三级分类，比作者标签准得多，
+            // 所以这一步值得多花二十几秒。
+            var enriched = new List<DouyinDesktop.Core.Models.Aweme>(distinct.Count);
+            int detailOk = 0, officialOk = 0;
+
+            for (int i = 0; i < distinct.Count; i++)
+            {
+                TasteStatus.Text = $"读取平台标签 {i + 1}/{distinct.Count}…（每条约 0.6 秒）";
+
+                var detail = await _client.GetAwemeDetailAsync(distinct[i].Id);
+                if (detail is not null)
+                {
+                    detailOk++;
+                    if (detail.OfficialTags.Count > 0) officialOk++;
+                    enriched.Add(detail);
+                }
+                else
+                {
+                    enriched.Add(distinct[i]);      // 详情失败就退回作者标签
+                }
+
+                await Task.Delay(300);              // 限速，别把详情接口打成风控
+            }
+
+            AppLog.Write($"[倾向] 详情 {detailOk}/{distinct.Count} 成功，平台标签 {officialOk} 条");
+
+            var report = DouyinDesktop.Core.TasteAnalyzer.Analyze(enriched);
+            RenderTaste(report);
+
+            string tail = officialOk > 0 ? $"，平台标签覆盖 {officialOk}/{distinct.Count}" : "";
+            TasteStatus.Text = failed == 0
+                ? $"完成，采样 {distinct.Count} 条{tail}"
+                : $"完成，采样 {distinct.Count} 条{tail}（{failed} 批失败）";
+        }
+        catch (Exception ex)
+        {
+            TasteStatus.Text = "分析失败：" + ex.Message;
+            AppLog.Write("[倾向] 异常：" + ex);
+        }
+        finally
+        {
+            TasteRunBtn.IsEnabled = true;
+        }
+    }
+
+    private void RenderTaste(DouyinDesktop.Core.TasteReport r)
+    {
+        TasteResult.Visibility = Visibility.Visible;
+        TasteSummary.Text = r.Summary;
+
+        var session = _client.Session ?? DouyinDesktop.Core.Api.DouyinSession.Load();
+        bool logged = session?.IsLoggedIn == true;
+
+        double avg = r.Sampled == 0 ? 0 : (double)r.TagTotal / r.Sampled;
+        string meta = $"采样 {r.Sampled} 条 · 平台标签 {r.OfficialCovered} 条 · 已归类 {r.Classified} 条 · 平均每条 {avg:0.0} 个标签";
+        if (r.ImagePosts > 0) meta += $" · 图集 {r.ImagePosts} 条";
+        meta += logged ? " · 已登录" : " · 游客态（登录后结果更贴近你的兴趣）";
+        TasteMeta.Text = meta;
+
+        // ---- 主题分布 ----
+        TasteThemes.Children.Clear();
+        for (int i = 0; i < r.Themes.Count; i++)
+        {
+            var t = r.Themes[i];
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 7) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(92) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
+
+            row.Children.Add(new TextBlock
+            {
+                Text = t.Theme,
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xC8, 0xC8, 0xD2)),
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+
+            // 用两列 Star 权重画占比，不用固定像素——窗口缩放也不会错位
+            var barGrid = new Grid { Height = 8, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+            double fillWeight = Math.Max(0.01, t.Percent);
+            barGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(fillWeight, GridUnitType.Star) });
+            barGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.001, 1 - fillWeight), GridUnitType.Star) });
+
+            var fill = new Border
+            {
+                CornerRadius = new CornerRadius(4, 0, 0, 4),
+                Background = new SolidColorBrush(ThemeBarColor(i)),
+            };
+            var rest = new Border
+            {
+                CornerRadius = new CornerRadius(0, 4, 4, 0),
+                Background = new SolidColorBrush(Color.FromRgb(0x22, 0x22, 0x2C)),
+            };
+            Grid.SetColumn(rest, 1);
+            barGrid.Children.Add(fill);
+            barGrid.Children.Add(rest);
+            Grid.SetColumn(barGrid, 1);
+            row.Children.Add(barGrid);
+
+            var pct = new TextBlock
+            {
+                Text = t.Percent.ToString("P0"),
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x8C, 0x8C, 0x99)),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(pct, 2);
+            row.Children.Add(pct);
+
+            // 代表标签放在名字下面会太挤，做成 ToolTip
+            if (t.Samples.Count > 0)
+                row.ToolTip = $"{t.Theme}：{t.Count} 条\n代表标签：{string.Join("、", t.Samples.Select(s => "#" + s))}";
+
+            TasteThemes.Children.Add(row);
+        }
+
+        // ---- 高频标签 ----
+        TasteTags.Children.Clear();
+        foreach (var tag in r.TopTags)
+        {
+            var chip = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0x22, 0x22, 0x2C)),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 4, 8, 4),
+                Margin = new Thickness(0, 0, 6, 6),
+            };
+            chip.Child = new TextBlock
+            {
+                Text = $"#{tag.Tag}  {tag.Count}",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xA8, 0xA8, 0xB8)),
+            };
+            TasteTags.Children.Add(chip);
+        }
+
+        // ---- 作者集中度 ----
+        TasteAuthors.Children.Clear();
+        foreach (var a in r.TopAuthors)
+        {
+            double share = r.Sampled == 0 ? 0 : (double)a.Count / r.Sampled;
+            TasteAuthors.Children.Add(new TextBlock
+            {
+                Text = $"{a.Name}　{a.Count} 条（{share:P0}）",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x8C, 0x8C, 0x99)),
+                Margin = new Thickness(0, 0, 0, 3),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+        }
+    }
+
+    /// <summary>主题条的颜色：前几名用品牌红，往后逐渐冷下去，一眼能分出主次。</summary>
+    private static Color ThemeBarColor(int index) => index switch
+    {
+        0 => Color.FromRgb(0xFE, 0x2C, 0x55),
+        1 => Color.FromRgb(0xFF, 0x6B, 0x81),
+        2 => Color.FromRgb(0x7A, 0x5C, 0xFF),
+        3 => Color.FromRgb(0x4A, 0x90, 0xD9),
+        4 => Color.FromRgb(0x3D, 0xB0, 0x8A),
+        _ => Color.FromRgb(0x4A, 0x4A, 0x58),
+    };
+
 
     // ================= 标签分组 =================
 
@@ -339,11 +607,13 @@ public partial class SettingsWindow : Window
     {
         NavAccount.Tag = page == "account" ? "active" : null;
         NavKeys.Tag = page == "keys" ? "active" : null;
+        NavTaste.Tag = page == "taste" ? "active" : null;
         NavPlay.Tag = page == "play" ? "active" : null;
         NavAbout.Tag = page == "about" ? "active" : null;
 
         PageAccount.Visibility = page == "account" ? Visibility.Visible : Visibility.Collapsed;
         PageKeys.Visibility = page == "keys" ? Visibility.Visible : Visibility.Collapsed;
+        PageTaste.Visibility = page == "taste" ? Visibility.Visible : Visibility.Collapsed;
         PagePlay.Visibility = page == "play" ? Visibility.Visible : Visibility.Collapsed;
         PageAbout.Visibility = page == "about" ? Visibility.Visible : Visibility.Collapsed;
     }

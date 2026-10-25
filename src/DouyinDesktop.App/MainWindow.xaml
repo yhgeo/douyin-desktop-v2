@@ -38,8 +38,30 @@
 
         <!-- 自绘标题栏 -->
         <Grid x:Name="TitleBar" Grid.Row="0" Height="38" Background="{StaticResource BgBrush}">
-            <TextBlock Text="抖音" Margin="16,0,0,0" VerticalAlignment="Center"
-                       FontSize="12" Foreground="{StaticResource SubTextBrush}" />
+            <!-- 左侧：内容源导航（原来这里是个"抖音"字样，占位置又没用，去掉了） -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="4,0,0,0"
+                        WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button x:Name="NavRecommend" Content="推荐" Width="52" Height="38"
+                        Style="{StaticResource CaptionButton}"
+                        FontFamily="Microsoft YaHei UI" FontSize="12"
+                        ToolTip="推荐流"
+                        Click="OnRecommendClick" />
+                <Button x:Name="NavFollow" Content="关注" Width="52" Height="38"
+                        Style="{StaticResource CaptionButton}"
+                        FontFamily="Microsoft YaHei UI" FontSize="12"
+                        ToolTip="我关注的人发的视频"
+                        Click="OnFollowClick" />
+                <Button x:Name="NavLikes" Content="喜欢" Width="52" Height="38"
+                        Style="{StaticResource CaptionButton}"
+                        FontFamily="Microsoft YaHei UI" FontSize="12"
+                        ToolTip="我点过赞的视频"
+                        Click="OnLikesClick" />
+                <Button x:Name="NavCollect" Content="收藏" Width="52" Height="38"
+                        Style="{StaticResource CaptionButton}"
+                        FontFamily="Microsoft YaHei UI" FontSize="12"
+                        ToolTip="我收藏的视频"
+                        Click="OnCollectClick" />
+            </StackPanel>
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                         WindowChrome.IsHitTestVisibleInChrome="True">

@@ -1154,6 +1154,930 @@ if (args.Length > 0 && args[0] == "whoami")
     return 0;
 }
 
+// 喜欢 / 收藏 到底能不能拉：dotnet run --project src/DouyinDesktop.Probe -- fav
+// 一个个候选路径试过去，把 HTTP 状态、body 长度、status_code 都打出来。
+// 目的只有一个：确认"读方向"通不通，别猜。
+if (args.Length > 0 && args[0] == "fav")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var s0 = await c.EnsureSessionAsync();
+    Console.WriteLine($"登录态：{(string.IsNullOrEmpty(s0.LoginCookies) ? "游客（无 Cookie）" : "已登录")}");
+    string widPath = Path.Combine(DouyinPaths.DataDirectory, "webid.txt");
+    Console.WriteLine($"webid  = {(File.Exists(widPath) ? File.ReadAllText(widPath).Trim() : "(无 webid.txt)")}");
+    Console.WriteLine($"uifid  = {(string.IsNullOrEmpty(s0.EffectiveUifid) ? "(空)" : s0.EffectiveUifid)}");
+
+    // 候选路径 + 各自最小参数。路径写法来自网页端习惯，错了就是 404/空 body，不会炸。
+    var cases = new (string Label, string Path, bool WebSign, KeyValuePair<string, string>[] Extra)[]
+    {
+        ("喜欢 favorite",
+            "/aweme/v1/web/aweme/favorite/", false,
+            new[] { new KeyValuePair<string, string>("count", "10"),
+                    new KeyValuePair<string, string>("max_cursor", "0") }),
+
+        ("喜欢 favorite +webSign",
+            "/aweme/v1/web/aweme/favorite/", true,
+            new[] { new KeyValuePair<string, string>("count", "10"),
+                    new KeyValuePair<string, string>("max_cursor", "0") }),
+
+        ("收藏 listcollection",
+            "/aweme/v1/web/aweme/listcollection/", false,
+            new[] { new KeyValuePair<string, string>("count", "10"),
+                    new KeyValuePair<string, string>("cursor", "0") }),
+
+        ("收藏 listcollection +webSign",
+            "/aweme/v1/web/aweme/listcollection/", true,
+            new[] { new KeyValuePair<string, string>("count", "10"),
+                    new KeyValuePair<string, string>("cursor", "0") }),
+
+        ("收藏夹分类 collect/list",
+            "/aweme/v1/web/aweme/collect/list/", false,
+            new[] { new KeyValuePair<string, string>("count", "10"),
+                    new KeyValuePair<string, string>("cursor", "0") }),
+
+        ("收藏夹分类 +webSign",
+            "/aweme/v1/web/aweme/collect/list/", true,
+            new[] { new KeyValuePair<string, string>("count", "10"),
+                    new KeyValuePair<string, string>("cursor", "0") }),
+
+        ("我的信息 profile/self",
+            "/aweme/v1/web/user/profile/self/", true,
+            Array.Empty<KeyValuePair<string, string>>()),
+    };
+
+    foreach (var (label, path, webSign, extra) in cases)
+    {
+        try
+        {
+            var (status, body) = await c.GetRawAsync(path, extra, webSign);
+
+            string code = "-";
+            int n = 0;
+            if (body.Length > 2 && body.TrimStart()[0] == '{')
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(body);
+                    if (doc.RootElement.TryGetProperty("status_code", out var sc) && sc.ValueKind == JsonValueKind.Number)
+                        code = sc.GetInt32().ToString();
+                    // 顺带数一下拿到几条作品
+                    if (doc.RootElement.TryGetProperty("aweme_list", out var al) && al.ValueKind == JsonValueKind.Array)
+                        n = al.GetArrayLength();
+                }
+                catch (JsonException) { }
+            }
+
+            Console.WriteLine($"\n=== {label} ===");
+            Console.WriteLine($"  HTTP {status}  {body.Length} 字节  status_code={code}  作品 {n} 条");
+            if (body.Length > 0)
+                Console.WriteLine("  " + body[..Math.Min(220, body.Length)].Replace("\n", " "));
+
+            // 有作品就抽一条出来看看字段（标题 + 标签）
+            if (n > 0)
+            {
+                using var doc = JsonDocument.Parse(body);
+                var head = doc.RootElement.GetProperty("aweme_list")[0];
+                string desc = head.TryGetProperty("desc", out var d) && d.ValueKind == JsonValueKind.String
+                    ? (d.GetString() ?? "") : "";
+                string nick = "";
+                if (head.TryGetProperty("author", out var au) &&
+                    au.TryGetProperty("nickname", out var nk) && nk.ValueKind == JsonValueKind.String)
+                    nick = nk.GetString() ?? "";
+                Console.WriteLine($"  首条：@{nick}  {Short(desc, 40)}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n=== {label} ===\n  异常：{ex.Message}");
+        }
+
+        await Task.Delay(900);
+    }
+    return 0;
+}
+
+// 喜欢接口的参数矩阵 + 登录态对照：dotnet run --project src/DouyinDesktop.Probe -- fav2
+// fav 已经确认：`aweme/favorite/` 存在，不签 webSign 是 403 Argus，签了是 200 但 aweme_list=null。
+// 这一轮只回答两个问题：① 缺哪个参数 ② 当前登录态到底健康不健康
+if (args.Length > 0 && args[0] == "fav2")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var s = await c.EnsureSessionAsync();
+    bool logged = !string.IsNullOrEmpty(s.LoginCookies);
+    Console.WriteLine($"登录态：{(logged ? "已登录" : "游客")}  msToken={(s.MsToken.Length > 0 ? "有" : "无")}");
+
+    // ---- 对照 1：作者主页（已知可用，能返回 20 条左右）----
+    Console.WriteLine("\n=== 对照：aweme/post（已知可用）===");
+    var fb = await c.GetFeedAsync(5);
+    if (fb.Success && fb.Items.Count > 0)
+    {
+        string uid = fb.Items[0].Author.SecUid;
+        Console.WriteLine($"  推荐流拿到 {fb.Items.Count} 条，取作者 sec_uid={Short(uid, 40)}");
+        var posts = await c.GetUserPostsAsync(uid);
+        Console.WriteLine($"  作者主页：{(posts.Success ? posts.Items.Count + " 条" : "失败 " + posts.Message)}");
+    }
+    else Console.WriteLine("  推荐流失败：" + fb.Message);
+
+    await Task.Delay(1200);
+
+    // ---- 对照 2：评论（强校验接口，能反映登录态）----
+    Console.WriteLine("\n=== 对照：评论 ===");
+    var withComment = fb.Success ? fb.Items.FirstOrDefault(x => (x.Statistics?.CommentCount ?? 0) > 0) : null;
+    if (withComment is not null)
+    {
+        var page = await c.GetCommentsAsync(withComment.Id, 0, 20);
+        Console.WriteLine($"  作品 {withComment.Id} 评论 {page.Comments.Count} 条 {(page.Comments.Count == 0 ? "← 空，登录态可疑" : "")}");
+    }
+    else Console.WriteLine("  这批里没有带评论的作品，跳过");
+
+    await Task.Delay(1200);
+
+    // ---- 喜欢接口：逐个补参数，看哪个能让 aweme_list 不是 null ----
+    Console.WriteLine("\n=== 喜欢 favorite：参数矩阵（全部走 webSign）===");
+
+    var matrix = new (string Label, KeyValuePair<string, string>[] Extra)[]
+    {
+        ("只有 count+cursor", new[]
+        {
+            new KeyValuePair<string, string>("count", "10"),
+            new KeyValuePair<string, string>("max_cursor", "0"),
+        }),
+        ("加 min_cursor", new[]
+        {
+            new KeyValuePair<string, string>("count", "10"),
+            new KeyValuePair<string, string>("max_cursor", "0"),
+            new KeyValuePair<string, string>("min_cursor", "0"),
+        }),
+        ("加空 sec_user_id", new[]
+        {
+            new KeyValuePair<string, string>("sec_user_id", ""),
+            new KeyValuePair<string, string>("count", "10"),
+            new KeyValuePair<string, string>("max_cursor", "0"),
+        }),
+        ("加 publish_video_strategy_type", new[]
+        {
+            new KeyValuePair<string, string>("count", "10"),
+            new KeyValuePair<string, string>("max_cursor", "0"),
+            new KeyValuePair<string, string>("publish_video_strategy_type", "2"),
+        }),
+        ("浏览器全套（含 from_user_page/support_dash）", new[]
+        {
+            new KeyValuePair<string, string>("sec_user_id", ""),
+            new KeyValuePair<string, string>("max_cursor", "0"),
+            new KeyValuePair<string, string>("min_cursor", "0"),
+            new KeyValuePair<string, string>("count", "10"),
+            new KeyValuePair<string, string>("publish_video_strategy_type", "2"),
+            new KeyValuePair<string, string>("from_user_page", "1"),
+            new KeyValuePair<string, string>("support_dash", "1"),
+        }),
+    };
+
+    foreach (var (label, extra) in matrix)
+    {
+        try
+        {
+            var (status, body) = await c.GetRawAsync("/aweme/v1/web/aweme/favorite/", extra, useWebSign: true);
+            Console.WriteLine($"  {label,-40} HTTP {status}  {body.Length} 字节  {Short(body, 90)}");
+        }
+        catch (Exception ex) { Console.WriteLine($"  {label,-40} 异常 {ex.Message}"); }
+        await Task.Delay(900);
+    }
+
+    // ---- 收藏：路径变体（listcollection/collect 都是 404，换个写法试）----
+    Console.WriteLine("\n=== 收藏：路径变体（走 webSign）===");
+    string[] favPaths =
+    {
+        "/aweme/v1/web/aweme/collection/list/",
+        "/aweme/v1/web/collect/list/",
+        "/aweme/v1/web/aweme/list/collection/",
+        "/aweme/v1/web/user/collect/list/",
+        "/aweme/v1/web/aweme/collect/",
+    };
+    foreach (string path in favPaths)
+    {
+        try
+        {
+            var (status, body) = await c.GetRawAsync(path, new[]
+            {
+                new KeyValuePair<string, string>("count", "10"),
+                new KeyValuePair<string, string>("cursor", "0"),
+            }, useWebSign: true);
+            Console.WriteLine($"  {path,-40} HTTP {status}  {body.Length} 字节  {Short(body, 70)}");
+        }
+        catch (Exception ex) { Console.WriteLine($"  {path,-40} 异常 {ex.Message}"); }
+        await Task.Delay(800);
+    }
+
+    return 0;
+}
+
+// favorite 只差 sec_user_id？拿别人的 sec_uid 试一下参数对不对
+// dotnet run --project src/DouyinDesktop.Probe -- fav3
+if (args.Length > 0 && args[0] == "fav3")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var fb = await c.GetFeedAsync(5);
+    if (!fb.Success || fb.Items.Count == 0) { Console.WriteLine("推荐流失败"); return 1; }
+
+    // 取前 3 个作者的 sec_uid 逐个试
+    var uids = fb.Items.Select(x => x.Author.SecUid).Where(x => x.Length > 10).Distinct().Take(3).ToList();
+    Console.WriteLine($"候选 sec_uid {uids.Count} 个\n");
+
+    foreach (string uid in uids)
+    {
+        try
+        {
+            var (status, body) = await c.GetRawAsync("/aweme/v1/web/aweme/favorite/", new[]
+            {
+                new KeyValuePair<string, string>("sec_user_id", uid),
+                new KeyValuePair<string, string>("count", "10"),
+                new KeyValuePair<string, string>("max_cursor", "0"),
+                new KeyValuePair<string, string>("min_cursor", "0"),
+                new KeyValuePair<string, string>("publish_video_strategy_type", "2"),
+            }, useWebSign: true);
+
+            int n = 0;
+            if (body.Length > 2 && body.TrimStart()[0] == '{')
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(body);
+                    if (doc.RootElement.TryGetProperty("aweme_list", out var al) && al.ValueKind == JsonValueKind.Array)
+                        n = al.GetArrayLength();
+                }
+                catch (JsonException) { }
+            }
+
+            Console.WriteLine($"sec_uid={Short(uid, 30)}  HTTP {status}  {body.Length}B  作品 {n} 条  {Short(body, 80)}");
+        }
+        catch (Exception ex) { Console.WriteLine($"sec_uid={Short(uid, 30)}  异常 {ex.Message}"); }
+        await Task.Delay(1000);
+    }
+
+    // 顺手试：profile/other 能不能用数字 uid 换 sec_uid
+    Console.WriteLine("\n=== profile/other 试探 ===");
+    string[] tryIds = { "7572717252269574195" };
+    foreach (string id in tryIds)
+    {
+        var (st, bd) = await c.GetRawAsync("/aweme/v1/web/user/profile/other/", new[]
+        {
+            new KeyValuePair<string, string>("sec_user_id", ""),
+            new KeyValuePair<string, string>("user_id", id),
+            new KeyValuePair<string, string>("publish_video_strategy_type", "2"),
+        }, useWebSign: true);
+        Console.WriteLine($"  user_id={id}  HTTP {st}  {bd.Length}B  {Short(bd, 160)}");
+        await Task.Delay(800);
+    }
+
+    return 0;
+}
+
+// 浏览器打开自己主页时发出的"当前用户"类接口，纯 HTTP 能不能通
+// dotnet run --project src/DouyinDesktop.Probe -- quser
+if (args.Length > 0 && args[0] == "quser")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    string[] paths =
+    {
+        "/aweme/v1/web/query/user/",
+        "/aweme/v1/web/social/count",
+        "/aweme/v1/web/get/user/settings/",
+        "/aweme/v1/web/get/user/risklevel/",
+    };
+
+    foreach (string path in paths)
+    {
+        foreach (bool ws in new[] { false, true })
+        {
+            try
+            {
+                var (status, body) = await c.GetRawAsync(path, null, useWebSign: ws);
+                Console.WriteLine($"\n=== {path}  webSign={ws} ===");
+                Console.WriteLine($"  HTTP {status}  {body.Length} 字节");
+                if (body.Length > 0) Console.WriteLine("  " + Short(body, 400));
+
+                // 一旦看到 sec_uid 就单独标出来——这是这次真正要的东西
+                int i = body.IndexOf("MS4wLjABAAAA", StringComparison.Ordinal);
+                if (i >= 0)
+                {
+                    int end = i;
+                    while (end < body.Length && "\"',& ".IndexOf(body[end]) < 0) end++;
+                    Console.WriteLine($"  ★ sec_uid = {body[i..end]}");
+                }
+            }
+            catch (Exception ex) { Console.WriteLine($"\n=== {path}  webSign={ws} ===\n  异常 {ex.Message}"); }
+            await Task.Delay(900);
+        }
+    }
+    return 0;
+}
+
+// 有了数字 uid 之后，怎么换成 sec_uid / 直接拉喜欢
+// dotnet run --project src/DouyinDesktop.Probe -- fav4
+if (args.Length > 0 && args[0] == "fav4")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    // 1) 先问 query/user 要自己的数字 uid
+    var (qs, qb) = await c.GetRawAsync("/aweme/v1/web/query/user/");
+    string uid = "";
+    if (qb.Length > 2)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(qb);
+            if (doc.RootElement.TryGetProperty("user_uid", out var v) && v.ValueKind == JsonValueKind.String)
+                uid = v.GetString() ?? "";
+        }
+        catch (JsonException) { }
+    }
+    Console.WriteLine($"query/user → HTTP {qs}  数字 uid = {(uid.Length > 0 ? uid : "(没拿到)")}");
+    if (uid.Length == 0) return 1;
+
+    await Task.Delay(800);
+
+    // 2) profile/other 用数字 uid，看能不能换出 sec_uid
+    Console.WriteLine("\n=== profile/other 用 user_id ===");
+    foreach (bool ws in new[] { false, true })
+    {
+        var (st, bd) = await c.GetRawAsync("/aweme/v1/web/user/profile/other/", new[]
+        {
+            new KeyValuePair<string, string>("user_id", uid),
+            new KeyValuePair<string, string>("publish_video_strategy_type", "2"),
+        }, useWebSign: ws);
+        Console.WriteLine($"  webSign={ws}  HTTP {st}  {bd.Length}B  {Short(bd, 200)}");
+        int i = bd.IndexOf("MS4wLjABAAAA", StringComparison.Ordinal);
+        if (i >= 0)
+        {
+            int end = i;
+            while (end < bd.Length && "\"',& ".IndexOf(bd[end]) < 0) end++;
+            Console.WriteLine($"  ★ sec_uid = {bd[i..end]}");
+        }
+        await Task.Delay(900);
+    }
+
+    // 3) 喜欢接口直接喂 user_id
+    Console.WriteLine("\n=== favorite 用 user_id ===");
+    foreach (string key in new[] { "user_id", "sec_user_id" })
+    {
+        var (st, bd) = await c.GetRawAsync("/aweme/v1/web/aweme/favorite/", new[]
+        {
+            new KeyValuePair<string, string>(key, uid),
+            new KeyValuePair<string, string>("count", "10"),
+            new KeyValuePair<string, string>("max_cursor", "0"),
+            new KeyValuePair<string, string>("min_cursor", "0"),
+        }, useWebSign: true);
+        int n = 0;
+        try
+        {
+            using var doc = JsonDocument.Parse(bd);
+            if (doc.RootElement.TryGetProperty("aweme_list", out var al) && al.ValueKind == JsonValueKind.Array)
+                n = al.GetArrayLength();
+        }
+        catch (JsonException) { }
+        Console.WriteLine($"  {key}={uid}  HTTP {st}  {bd.Length}B  作品 {n} 条  {Short(bd, 120)}");
+        await Task.Delay(1000);
+    }
+
+    return 0;
+}
+
+// 推荐倾向分析（设置页那个功能的命令行版）：dotnet run --project src/DouyinDesktop.Probe -- taste
+// 拉 5 批推荐，统计话题标签，看主题分布对不对。
+if (args.Length > 0 && args[0] == "taste")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var collected = new List<DouyinDesktop.Core.Models.Aweme>();
+    var ids = new List<string>();
+
+    for (int i = 0; i < 2; i++)
+    {
+        Console.Write($"第 {i + 1}/2 批… ");
+        var r = await c.GetFeedAsync(20, ids);
+        if (!r.Success) { Console.WriteLine("失败：" + r.Message); }
+        else
+        {
+            collected.AddRange(r.Items);
+            ids.AddRange(r.Items.Select(x => x.Id));
+            Console.WriteLine($"{r.Items.Count} 条（累计 {collected.Count}）");
+        }
+        if (i < 1) await Task.Delay(1200);
+    }
+
+    var distinct = collected.GroupBy(x => x.Id).Select(g => g.First()).ToList();
+
+    // 逐条取详情补平台标签（推荐流里 video_tag 是 0%）
+    Console.WriteLine($"\n逐条取详情补平台标签（{distinct.Count} 条，约 {distinct.Count * 0.6:0} 秒）…");
+    var swDetail = System.Diagnostics.Stopwatch.StartNew();
+    int officialOk = 0;
+    for (int i = 0; i < distinct.Count; i++)
+    {
+        var d = await c.GetAwemeDetailAsync(distinct[i].Id);
+        if (d is not null)
+        {
+            if (d.OfficialTags.Count > 0) { officialOk++; distinct[i] = d; }
+        }
+        if ((i + 1) % 10 == 0) Console.Write($" {i + 1}");
+        await Task.Delay(300);
+    }
+    swDetail.Stop();
+    Console.WriteLine($"\n详情完成：{swDetail.Elapsed.TotalSeconds:0.0}s，平台标签 {officialOk}/{distinct.Count}\n");
+
+    var rep = TasteAnalyzer.Analyze(distinct);
+
+    Console.WriteLine($"=== 采样 {rep.Sampled} 条，带标签 {rep.WithTags} 条（{rep.TagCoverage:P0}），" +
+                      $"平均每条 {(rep.Sampled == 0 ? 0 : (double)rep.TagTotal / rep.Sampled):0.0} 个标签，" +
+                      $"已归类 {rep.Classified} 条，平台标签 {rep.OfficialCovered} 条 ===");
+    Console.WriteLine($"结论：{rep.Summary}\n");
+
+    Console.WriteLine("主题分布：");
+    foreach (var t in rep.Themes)
+        Console.WriteLine($"  {t.Theme,-10} {t.Count,3} 条  {t.Percent,6:P0}   {(t.Samples.Count > 0 ? "例：" + string.Join("、", t.Samples) : "")}");
+
+    Console.WriteLine("\n高频标签：");
+    for (int i = 0; i < rep.TopTags.Count; i += 5)
+        Console.WriteLine("  " + string.Join("  ", rep.TopTags.Skip(i).Take(5).Select(x => $"#{x.Tag}({x.Count})")));
+
+    Console.WriteLine("\n作者集中度：");
+    foreach (var a in rep.TopAuthors)
+        Console.WriteLine($"  {a.Name,-16} {a.Count,2} 条（{(double)a.Count / Math.Max(1, rep.Sampled):P0}）");
+
+    return 0;
+}
+
+// 登录态到底算不算"有效"：dotnet run --project src/DouyinDesktop.Probe -- loginstat
+// 走 VerifyLoginAsync（profile/self 主探针 + 点赞兜底），验证判断逻辑本身。
+if (args.Length > 0 && args[0] == "loginstat")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var s = await c.EnsureSessionAsync();
+    Console.WriteLine($"IsLoggedIn（只看有没有 Cookie）= {s.IsLoggedIn}");
+
+    bool? ok = await c.VerifyLoginAsync();
+    Console.WriteLine($"VerifyLoginAsync = {(ok is null ? "判断不了（网络问题）" : ok.Value ? "有效" : "无效/未登录")}");
+
+    // 把两个探针的原始返回都打出来，方便对照
+    var (_, self) = await c.GetRawAsync("/aweme/v1/web/user/profile/self/", null, useWebSign: true);
+    Console.WriteLine($"\nprofile/self：{Short(self, 160)}");
+
+    var (_, qu) = await c.GetRawAsync("/aweme/v1/web/query/user/");
+    Console.WriteLine($"query/user  ：{Short(qu, 160)}");
+    return 0;
+}
+
+// 登录后 dump profile/self 的完整响应，找自己的 sec_uid
+// dotnet run --project src/DouyinDesktop.Probe -- selfdump
+if (args.Length > 0 && args[0] == "selfdump")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var (st, body) = await c.GetRawAsync("/aweme/v1/web/user/profile/self/", null, useWebSign: true);
+    Console.WriteLine($"HTTP {st}  {body.Length} 字节\n");
+
+    // 把带 sec_uid / uid / nickname 的字段全挑出来
+    try
+    {
+        using var doc = JsonDocument.Parse(body);
+        void Walk(JsonElement el, string path, int depth)
+        {
+            if (depth > 3) return;
+            if (el.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var p in el.EnumerateObject())
+                {
+                    string np = path.Length == 0 ? p.Name : path + "." + p.Name;
+                    if (p.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array) Walk(p.Value, np, depth + 1);
+                    else if (p.Name is "sec_uid" or "uid" or "nickname" or "unique_id" or "short_id"
+                             or "user_id" or "follower_count" or "following_count" or "aweme_count")
+                        Console.WriteLine($"  {np} = {p.Value}");
+                }
+            }
+            else if (el.ValueKind == JsonValueKind.Array)
+            {
+                int i = 0;
+                foreach (var item in el.EnumerateArray()) Walk(item, $"{path}[{i++}]", depth + 1);
+            }
+        }
+        Walk(doc.RootElement, "", 0);
+    }
+    catch (JsonException) { Console.WriteLine("不是 JSON：" + Short(body, 200)); }
+
+    int idx = body.IndexOf("MS4wLjABAAAA", StringComparison.Ordinal);
+    if (idx >= 0)
+    {
+        int end = idx;
+        while (end < body.Length && "\"',& ".IndexOf(body[end]) < 0) end++;
+        Console.WriteLine($"\n★ sec_uid = {body[idx..end]}");
+    }
+    else Console.WriteLine("\n没找到 sec_uid");
+    return 0;
+}
+
+// 登录后用自己的 sec_uid 拉喜欢 / 收藏：dotnet run --project src/DouyinDesktop.Probe -- favmine
+if (args.Length > 0 && args[0] == "favmine")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    // 优先用 profile/self 现拿，拿不到再读文件
+    string secUid = "";
+    var (_, selfBody) = await c.GetRawAsync("/aweme/v1/web/user/profile/self/", null, useWebSign: true);
+    int i0 = selfBody.IndexOf("MS4wLjABAAAA", StringComparison.Ordinal);
+    if (i0 >= 0)
+    {
+        int end = i0;
+        while (end < selfBody.Length && "\"',& ".IndexOf(selfBody[end]) < 0) end++;
+        secUid = selfBody[i0..end];
+    }
+    if (secUid.Length == 0)
+    {
+        string f = Path.Combine(DouyinPaths.DataDirectory, "my-sec-uid.txt");
+        if (File.Exists(f)) secUid = File.ReadAllText(f).Trim();
+    }
+
+    if (secUid.Length == 0) { Console.WriteLine("拿不到自己的 sec_uid（登录失效？）"); return 1; }
+    Console.WriteLine($"自己的 sec_uid = {secUid}\n");
+
+    // ---- 喜欢 ----
+    Console.WriteLine("=== 喜欢 aweme/favorite ===");
+    foreach (int page in new[] { 0, 1 })
+    {
+        string cursor = (page * 20).ToString();
+        var (st, bd) = await c.GetRawAsync("/aweme/v1/web/aweme/favorite/", new[]
+        {
+            new KeyValuePair<string, string>("sec_user_id", secUid),
+            new KeyValuePair<string, string>("count", "20"),
+            new KeyValuePair<string, string>("max_cursor", cursor),
+            new KeyValuePair<string, string>("min_cursor", cursor),
+        }, useWebSign: true);
+
+        int n = 0;
+        long maxCursor = -1, hasMore = -1;
+        var names = new List<string>();
+        try
+        {
+            using var doc = JsonDocument.Parse(bd);
+            if (doc.RootElement.TryGetProperty("aweme_list", out var al) && al.ValueKind == JsonValueKind.Array)
+            {
+                n = al.GetArrayLength();
+                foreach (var a in al.EnumerateArray().Take(5))
+                {
+                    string nick = a.TryGetProperty("author", out var au) && au.TryGetProperty("nickname", out var nk)
+                        ? nk.GetString() ?? "" : "";
+                    string desc = a.TryGetProperty("desc", out var d) ? (d.GetString() ?? "") : "";
+                    names.Add($"@{nick} {Short(desc, 24)}");
+                }
+            }
+            if (doc.RootElement.TryGetProperty("max_cursor", out var mc) && mc.ValueKind == JsonValueKind.Number)
+                maxCursor = mc.GetInt64();
+            if (doc.RootElement.TryGetProperty("has_more", out var hm) && hm.ValueKind == JsonValueKind.Number)
+                hasMore = hm.GetInt64();
+        }
+        catch (JsonException) { }
+
+        Console.WriteLine($"  第 {page + 1} 页 HTTP {st}  {bd.Length}B  作品 {n} 条  has_more={hasMore}  max_cursor={maxCursor}");
+        foreach (string s in names) Console.WriteLine("      " + s);
+        if (n == 0) Console.WriteLine("      原始：" + Short(bd, 140));
+        await Task.Delay(1200);
+    }
+
+    // ---- 收藏：再试一批路径（登录态下）----
+    Console.WriteLine("\n=== 收藏：路径探测（登录态）===");
+    string[] paths =
+    {
+        "/aweme/v1/web/aweme/listcollection/",
+        "/aweme/v1/web/aweme/collect/list/",
+        "/aweme/v1/web/collect/list/",
+        "/aweme/v1/web/aweme/collection/list/",
+        "/aweme/v1/web/user/collect/list/",
+        "/aweme/v1/web/aweme/list/collection/",
+        "/aweme/v1/web/collects/list/",
+        "/aweme/v1/web/aweme/collect/",
+    };
+    foreach (string path in paths)
+    {
+        try
+        {
+            var (st, bd) = await c.GetRawAsync(path, new[]
+            {
+                new KeyValuePair<string, string>("count", "10"),
+                new KeyValuePair<string, string>("cursor", "0"),
+                new KeyValuePair<string, string>("sec_user_id", secUid),
+            }, useWebSign: true);
+            Console.WriteLine($"  {path,-42} HTTP {st}  {bd.Length}B  {Short(bd, 80)}");
+        }
+        catch (Exception ex) { Console.WriteLine($"  {path,-42} 异常 {ex.Message}"); }
+        await Task.Delay(800);
+    }
+
+    return 0;
+}
+
+// 收藏夹列表结构：dotnet run --project src/DouyinDesktop.Probe -- collections
+if (args.Length > 0 && args[0] == "collections")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    var (st, bd) = await c.GetRawAsync("/aweme/v1/web/collects/list/", new[]
+    {
+        new KeyValuePair<string, string>("count", "20"),
+        new KeyValuePair<string, string>("cursor", "0"),
+    }, useWebSign: true);
+
+    Console.WriteLine($"HTTP {st}  {bd.Length} 字节\n");
+
+    try
+    {
+        using var doc = JsonDocument.Parse(bd);
+        if (doc.RootElement.TryGetProperty("collects_list", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            Console.WriteLine($"收藏夹 {list.GetArrayLength()} 个：");
+            foreach (var g in list.EnumerateArray())
+            {
+                string name = g.TryGetProperty("collects_name", out var n) ? (n.GetString() ?? "") : "";
+                string id = g.TryGetProperty("collects_id_str", out var i) ? (i.GetString() ?? "")
+                          : g.TryGetProperty("collects_id", out var i2) ? i2.ToString() : "";
+                string cnt = g.TryGetProperty("total_number", out var t) ? t.ToString()
+                           : g.TryGetProperty("item_count", out var t2) ? t2.ToString() : "?";
+                Console.WriteLine($"  · {name}  id={id}  数量={cnt}");
+                Console.WriteLine($"    {Short(g.GetRawText(), 200)}");
+            }
+        }
+        else
+        {
+            Console.WriteLine("没有 collects_list，原始：");
+            Console.WriteLine(Short(bd, 1200));
+        }
+
+        foreach (string k in new[] { "has_more", "cursor", "status_code" })
+            if (doc.RootElement.TryGetProperty(k, out var v)) Console.WriteLine($"  {k} = {v}");
+    }
+    catch (JsonException) { Console.WriteLine("非 JSON：" + Short(bd, 300)); }
+
+    return 0;
+}
+
+// 收藏夹里的作品：dotnet run --project src/DouyinDesktop.Probe -- collectitems
+if (args.Length > 0 && args[0] == "collectitems")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    const string collectsId = "7555198150416439040";
+
+    string[] paths =
+    {
+        "/aweme/v1/web/collects/item/list/",
+        "/aweme/v1/web/collects/video/list/",
+        "/aweme/v1/web/collects/aweme/list/",
+        "/aweme/v1/web/collects/detail/",
+        "/aweme/v1/web/aweme/collect/list/",
+        "/aweme/v1/web/collects/list/item/",
+    };
+
+    foreach (string path in paths)
+    {
+        foreach (string idKey in new[] { "collects_id", "collect_id" })
+        {
+            try
+            {
+                var (st, bd) = await c.GetRawAsync(path, new[]
+                {
+                    new KeyValuePair<string, string>(idKey, collectsId),
+                    new KeyValuePair<string, string>("count", "10"),
+                    new KeyValuePair<string, string>("cursor", "0"),
+                }, useWebSign: true);
+
+                int n = 0;
+                try
+                {
+                    using var doc = JsonDocument.Parse(bd);
+                    if (doc.RootElement.TryGetProperty("aweme_list", out var al) && al.ValueKind == JsonValueKind.Array)
+                        n = al.GetArrayLength();
+                }
+                catch (JsonException) { }
+
+                string mark = st == 200 && !bd.Contains("Unsupported path") ? " ★" : "";
+                Console.WriteLine($"  {path,-38} {idKey,-11} HTTP {st}  {bd.Length}B  作品 {n}{mark}");
+                if (mark.Length > 0) Console.WriteLine("      " + Short(bd, 200));
+            }
+            catch (Exception ex) { Console.WriteLine($"  {path,-38} {idKey,-11} 异常 {ex.Message}"); }
+            await Task.Delay(700);
+        }
+    }
+
+    return 0;
+}
+
+// 喜欢翻页（走 App 用的同一套 GetLikedAsync）：dotnet run --project src/DouyinDesktop.Probe -- likes
+if (args.Length > 0 && args[0] == "likes")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    string secUid = await c.GetSelfSecUidAsync();
+    if (secUid.Length == 0) { Console.WriteLine("拿不到 sec_uid（未登录）"); return 1; }
+    Console.WriteLine($"sec_uid = {secUid}\n");
+
+    string cursor = "0";
+    int total = 0;
+    for (int page = 0; page < 3; page++)
+    {
+        var r = await c.GetLikedAsync(secUid, cursor, 20);
+        Console.WriteLine($"第 {page + 1} 页  success={r.Success}  {r.Items.Count} 条  " +
+                          $"has_more={r.HasMore}  next={r.NextCursor}  {r.ElapsedMs}ms  {r.Message}");
+
+        if (!r.Success) break;
+        total += r.Items.Count;
+        foreach (var it in r.Items.Take(3))
+            Console.WriteLine($"      @{it.AuthorName}  {Short(it.Desc, 30)}");
+
+        if (!r.HasMore || r.NextCursor.Length == 0 || r.NextCursor == cursor) break;
+        cursor = r.NextCursor;
+        await Task.Delay(1500);
+    }
+    Console.WriteLine($"\n合计 {total} 条");
+
+    // 收藏也顺手验证一遍
+    Console.WriteLine("\n=== 收藏 ===");
+    string cid = await c.GetDefaultCollectsIdAsync();
+    Console.WriteLine($"collects_id = {(cid.Length > 0 ? cid : "(无)")}");
+    if (cid.Length > 0)
+    {
+        var cr = await c.GetCollectedAsync(cid, "0", 20);
+        Console.WriteLine($"success={cr.Success}  {cr.Items.Count} 条  has_more={cr.HasMore}  " +
+                          $"next={cr.NextCursor}  {cr.Message}");
+        foreach (var it in cr.Items.Take(3))
+            Console.WriteLine($"      @{it.AuthorName}  {Short(it.Desc, 30)}");
+
+        // 模拟 App 里的标签过滤——崩溃就发生在这条路径（TagRule.Allows → Hashtags）
+        if (cr.Success && cr.Items.Count > 0)
+        {
+            var rule = TagRule.Parse("美食");
+            int boom = 0;
+            foreach (var it in cr.Items)
+            {
+                try { _ = rule.Allows(it); }
+                catch (Exception ex) { boom++; Console.WriteLine($"      ✗ {it.Id} 标签过滤炸了：{ex.GetType().Name}"); }
+            }
+            Console.WriteLine($"      标签过滤：{cr.Items.Count - boom}/{cr.Items.Count} 通过" +
+                              (boom == 0 ? "（无异常）" : $"（{boom} 条异常）"));
+        }
+    }
+
+    return 0;
+}
+
+// 平台标签（video_tag）的覆盖率与耗时：dotnet run --project src/DouyinDesktop.Probe -- vtagcov
+// 回答"用平台标签做推荐倾向可不可行"：推荐流里没有，只能逐条调详情，先量一下代价。
+if (args.Length > 0 && args[0] == "vtagcov")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    int sample = args.Length > 1 && int.TryParse(args[1], out int s) ? s : 20;
+
+    var sampleFeed = await c.GetFeedAsync(sample);
+    if (!sampleFeed.Success) { Console.WriteLine("拉推荐失败：" + sampleFeed.Message); return 1; }
+
+    var ids = sampleFeed.Items.Select(x => x.Id).Distinct().Take(sample).ToList();
+    Console.WriteLine($"推荐流 {ids.Count} 条，开始逐条取详情…\n");
+
+    int ok = 0, hasOfficial = 0, hasAuthor = 0;
+    var officialCounter = new Dictionary<string, int>(StringComparer.Ordinal);
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+
+    foreach (string id in ids)
+    {
+        var d = await c.GetAwemeDetailAsync(id);
+        if (d is null) { Console.WriteLine($"  {id}  详情失败"); continue; }
+        ok++;
+
+        var official = d.OfficialTags;
+        var author = d.Hashtags;
+        if (official.Count > 0) hasOfficial++;
+        if (author.Count > 0) hasAuthor++;
+        foreach (string t in official) officialCounter[t] = officialCounter.GetValueOrDefault(t) + 1;
+
+        Console.WriteLine($"  {(official.Count == 0 ? "(无平台标签)" : string.Join(" / ", official)),-30} " +
+                          $"作者[{author.Count}个]");
+        await Task.Delay(350);
+    }
+
+    sw.Stop();
+    Console.WriteLine($"\n成功 {ok}/{ids.Count} 条，用时 {sw.Elapsed.TotalSeconds:0.0}s" +
+                      $"（平均 {sw.Elapsed.TotalMilliseconds / Math.Max(1, ok):0}ms/条）");
+    Console.WriteLine($"平台标签覆盖 {hasOfficial}/{ok}（{(ok == 0 ? 0 : hasOfficial * 100 / ok)}%），" +
+                      $"作者标签覆盖 {hasAuthor}/{ok}（{(ok == 0 ? 0 : hasAuthor * 100 / ok)}%）");
+
+    Console.WriteLine("\n平台标签出现次数：");
+    foreach (var (t, n) in officialCounter.OrderByDescending(x => x.Value).Take(15))
+        Console.WriteLine($"  {n,2}  {t}");
+
+    return 0;
+}
+
+// 收藏作品响应的真实结构：dotnet run --project src/DouyinDesktop.Probe -- dumpcollect
+if (args.Length > 0 && args[0] == "dumpcollect")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    string cid = await c.GetDefaultCollectsIdAsync();
+    Console.WriteLine($"collects_id = {cid}\n");
+
+    var (st, bd) = await c.GetRawAsync("/aweme/v1/web/collects/video/list/", new[]
+    {
+        new KeyValuePair<string, string>("collects_id", cid),
+        new KeyValuePair<string, string>("count", "10"),
+        new KeyValuePair<string, string>("cursor", "0"),
+    }, useWebSign: true);
+
+    Console.WriteLine($"HTTP {st}  {bd.Length} 字节\n");
+
+    using var doc = JsonDocument.Parse(bd);
+    Console.WriteLine("顶层字段：");
+    foreach (var p in doc.RootElement.EnumerateObject())
+    {
+        string extra = p.Value.ValueKind == JsonValueKind.Array ? $" [{p.Value.GetArrayLength()} 项]" : "";
+        Console.WriteLine($"  {p.Name,-24} {p.Value.ValueKind}{extra}");
+    }
+
+    if (doc.RootElement.TryGetProperty("aweme_list", out var al) && al.ValueKind == JsonValueKind.Array)
+    {
+        var head0 = al.EnumerateArray().FirstOrDefault();
+        Console.WriteLine($"\naweme_list[0] 类型 = {head0.ValueKind}");
+        string raw = head0.ValueKind switch
+        {
+            JsonValueKind.String => head0.GetString() ?? "",
+            JsonValueKind.Object => head0.GetRawText(),
+            _ => "",
+        };
+        Console.WriteLine(Short(raw, 300));
+
+        // 逐条试反序列化，把失败的原因打出来（现在有 6/20 条解析不出来）
+        Console.WriteLine($"\n逐条反序列化（共 {al.GetArrayLength()} 条）：");
+        int ok = 0;
+        int i = 0;
+        foreach (var a in al.EnumerateArray())
+        {
+            string r = a.ValueKind switch
+            {
+                JsonValueKind.String => a.GetString() ?? "",
+                JsonValueKind.Object => a.GetRawText(),
+                _ => "",
+            };
+            try
+            {
+                var item = DouyinClient.ParseOne(r);
+                if (item is null) Console.WriteLine($"  [{i}] null");
+                else { ok++; }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  [{i}] 失败：{ex.GetType().Name}: {ex.Message}");
+            }
+            i++;
+        }
+        Console.WriteLine($"成功 {ok}/{al.GetArrayLength()}");
+    }
+    else
+    {
+        Console.WriteLine("\n没有 aweme_list，整段开头：");
+        Console.WriteLine(Short(bd, 800));
+    }
+
+    return 0;
+}
+
 // 登录态 vs 游客态的关注流：内容一样就说明服务端根本没认登录
 // dotnet run --project src/DouyinDesktop.Probe -- followguest
 if (args.Length > 0 && args[0] == "followguest")

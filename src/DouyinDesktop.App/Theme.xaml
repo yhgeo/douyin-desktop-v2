@@ -328,4 +328,31 @@
         </Style.Triggers>
     </Style>
 
+    <!-- 全局提示气泡：必须是深底浅字。
+         默认 ToolTip 是白底，而标题栏按钮的前景色是浅色，气泡会继承成白字 →
+         白底白字，看起来就是"鼠标悬浮弹出一块白色"。2026-10-26 用户报的就是这个。 -->
+    <Style TargetType="ToolTip">
+        <Setter Property="Background" Value="#22222C" />
+        <Setter Property="Foreground" Value="#E8E8F0" />
+        <Setter Property="BorderBrush" Value="#33333F" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="9,5" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="HasDropShadow" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToolTip">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="5"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 </ResourceDictionary>

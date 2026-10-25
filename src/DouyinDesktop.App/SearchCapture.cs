@@ -27,6 +27,15 @@ public static class SearchCapture
     private static readonly string OutPath =
         Path.Combine(DouyinPaths.DataDirectory, "search-capture.json");
 
+    /// <summary>
+    /// 是不是真正的搜索接口。
+    /// 热搜榜（<c>hot/search/list</c>）路径里也含 search，必须排除——
+    /// 第一版就是这么扑空的：以为抓到了，其实抓的是热搜榜。
+    /// </summary>
+    private static bool IsSearchPath(string path)
+        => path.Contains("search/item", StringComparison.OrdinalIgnoreCase)
+        || path.Contains("general/search", StringComparison.OrdinalIgnoreCase);
+
     public static async Task<bool> CaptureAsync(string keyword, int timeoutSeconds = 300)
     {
         var dispatcher = Application.Current?.Dispatcher;
@@ -46,8 +55,20 @@ public static class SearchCapture
 
         var captured = new List<object>();
         var seenPaths = new List<string>();
+        var capturedUrls = new HashSet<string>(StringComparer.Ordinal);
         var done = new TaskCompletionSource<bool>();
         Window? host = null;
+        TextBlock? hint = null;
+
+        // 两个抓取通道（WebResourceRequested / CDP）都会走到这里，
+        // 用 URL 去重，免得同一条请求记两遍。
+        bool TryAdd(string uri, string method, Dictionary<string, string> headers, string path)
+        {
+            if (!capturedUrls.Add(uri)) return false;
+            captured.Add(new { url = uri, method, headers });
+            AppLog.Write($"[抓搜索] 抓到第 {captured.Count} 条：{path}");
+            return true;
+        }
 
         void Save()
         {
@@ -88,13 +109,16 @@ public static class SearchCapture
                 Margin = new Thickness(12, 10, 12, 10),
             };
 
-            bar.Children.Add(new TextBlock
+            hint = new TextBlock
             {
                 Text = $"在下面搜索「{keyword}」，等结果出来、随便点开一两个视频，然后点右边按钮",
                 VerticalAlignment = VerticalAlignment.Center,
                 FontSize = 13,
                 Foreground = System.Windows.Media.Brushes.Gainsboro,
-            });
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 720,
+            };
+            bar.Children.Add(hint);
 
             var finish = new Button
             {
@@ -157,6 +181,12 @@ public static class SearchCapture
             var core = web.CoreWebView2;
             core.Settings.AreDevToolsEnabled = false;
 
+            // WebView2 的 sessionid 是会话 Cookie，进程重启就丢，浏览器里默认是游客态。
+            // 游客态下搜索接口直接回 2483「请先登录」，页面自己都搜不出东西，
+            // 我们自然也抓不到请求——这是之前"抓包一直不成功"的真正原因。
+            int injected = WebCookieInject.Inject(core, WebCookieInject.LoadLoginCookies());
+            AppLog.Write($"[抓搜索] 已注入 {injected} 条登录 Cookie");
+
             // 页面很重，WebView2 的渲染进程可能挂掉——记下来，别只是"窗口没了"
             core.ProcessFailed += (_, e) =>
                 AppLog.Write($"[抓搜索] WebView2 进程失败：{e.ProcessFailedKind}");
@@ -174,16 +204,65 @@ public static class SearchCapture
 
                 // 只认真正的搜索接口。热搜榜（hot/search/list）路径里也有 search，
                 // 别被它骗了——第一版就是这么扑空的。
-                bool isRealSearch = path.Contains("search/item", StringComparison.OrdinalIgnoreCase)
-                                 || path.Contains("general/search", StringComparison.OrdinalIgnoreCase);
-                if (!isRealSearch) return;
+                if (!IsSearchPath(path)) return;
 
                 var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var h in e.Request.Headers) headers[h.Key] = h.Value;
 
-                captured.Add(new { url = uri, method = e.Request.Method, headers });
-                AppLog.Write($"[抓搜索] 抓到第 {captured.Count} 条：{path}");
+                TryAdd(uri, e.Request.Method, headers, path);
             };
+
+            // ---- 再挂一套 CDP 抓取 ----
+            // WebResourceRequested 抓不到页面 worker / service worker 发出的请求，
+            // 抓搜索时就是这么漏掉的。CDP 的 Network 域能看到全部请求，两套并行更稳。
+            try
+            {
+                await core.CallDevToolsProtocolMethodAsync("Network.enable", "{}");
+                var netReceiver = core.GetDevToolsProtocolEventReceiver("Network.requestWillBeSent");
+                netReceiver.DevToolsProtocolEventReceived += (_, e) =>
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(e.ParameterObjectAsJson);
+                        if (!doc.RootElement.TryGetProperty("request", out var req)) return;
+                        if (!req.TryGetProperty("url", out var u) || u.ValueKind != JsonValueKind.String) return;
+
+                        string uri = u.GetString() ?? "";
+                        int q = uri.IndexOf('?');
+                        if (q < 0) return;
+
+                        string path;
+                        try { path = new Uri(uri).AbsolutePath; } catch { return; }
+                        if (!seenPaths.Contains(path)) seenPaths.Add(path);
+                        if (!IsSearchPath(path)) return;
+
+                        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        if (req.TryGetProperty("headers", out var hs) && hs.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var h in hs.EnumerateObject())
+                                if (h.Value.ValueKind == JsonValueKind.String)
+                                    headers[h.Name] = h.Value.GetString() ?? "";
+                        }
+
+                        string method = req.TryGetProperty("method", out var m) && m.ValueKind == JsonValueKind.String
+                            ? m.GetString() ?? "GET" : "GET";
+
+                        if (!TryAdd(uri, method, headers, path)) return;
+
+                        // 抓到就更新界面上的提示，用户能看到"确实在抓"
+                        try
+                        {
+                            hint.Text = $"已抓到 {captured.Count} 条搜索请求，可以点右边按钮结束了";
+                        }
+                        catch { }
+                    }
+                    catch { }
+                };
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("[抓搜索] CDP 挂载失败（不影响 WebResourceRequested）：" + ex.Message);
+            }
 
             core.Navigate($"https://www.douyin.com/search/{Uri.EscapeDataString(keyword)}?type=video");
             AppLog.Write("[抓搜索] 已导航到搜索页");

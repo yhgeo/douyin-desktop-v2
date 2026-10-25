@@ -15,6 +15,19 @@ public sealed record FeedResult(
         => new(Array.Empty<Aweme>(), false, message, elapsedMs);
 }
 
+/// <summary>
+/// 带游标的分页结果（喜欢 / 收藏用）。
+/// 这两个接口的游标不是页码：喜欢给的是毫秒时间戳 <c>max_cursor</c>，
+/// 收藏给的是整数 <c>cursor</c>，**都必须从响应里取**，不能自己算。
+/// </summary>
+public sealed record PagedResult(
+    IReadOnlyList<Aweme> Items, bool Success, string Message,
+    long ElapsedMs, string NextCursor, bool HasMore)
+{
+    public static PagedResult Fail(string message, long elapsedMs = 0)
+        => new(Array.Empty<Aweme>(), false, message, elapsedMs, "", false);
+}
+
 public sealed record StreamProbe(
     bool Ok, int StatusCode, string ContentType, long ElapsedMs, string FinalHost, string Detail);
 
@@ -233,8 +246,25 @@ public sealed class DouyinClient : IDisposable
     }
 
     /// <summary>
-    /// 解析推荐流。结构：cards[].aweme，其中 aweme 是**字符串**（偶尔是对象），
-    /// 必须二次解析；没有 aweme 字段的 card 是广告位/提示位，跳过。
+    /// 解析单条作品 JSON。
+    /// 单独公开是为了能逐条诊断——某个字段对不上时，能定位到具体是哪一条、
+    /// 哪个字段，而不是整页丢掉只报"没有内容"。
+    /// </summary>
+    public static Aweme? ParseOne(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json.TrimStart()[0] != '{') return null;
+        return JsonSerializer.Deserialize<Aweme>(json, JsonOptions);
+    }
+
+    /// <summary>
+    /// 解析作品列表。**两种结构都要认**：
+    ///
+    ///   · 推荐流：<c>cards[].aweme</c>，aweme 是**字符串**，要二次解析
+    ///     （没有 aweme 字段的 card 是广告位/提示位，跳过）
+    ///   · 喜欢 / 收藏 / tab 流：<c>aweme_list</c>，直接是对象数组
+    ///
+    /// 只认 cards 的话，喜欢/收藏会解析出 0 条，上层报"没有内容"——
+    /// 但响应其实有 1.7 MB，看起来像接口坏了，其实是解析没覆盖（2026-10-26 踩过）。
     /// </summary>
     public static List<Aweme> ParseFeed(string json)
     {
@@ -244,21 +274,51 @@ public sealed class DouyinClient : IDisposable
         try
         {
             using var doc = JsonDocument.Parse(json);
-            if (!doc.RootElement.TryGetProperty("cards", out var cards)
-                || cards.ValueKind != JsonValueKind.Array)
-                return list;
 
-            foreach (var card in cards.EnumerateArray())
+            // ---- 结构一：cards[].aweme（推荐流）----
+            if (doc.RootElement.TryGetProperty("cards", out var cards)
+                && cards.ValueKind == JsonValueKind.Array)
             {
-                if (!card.TryGetProperty("aweme", out var aw)) continue;
+                foreach (var card in cards.EnumerateArray())
+                {
+                    if (!card.TryGetProperty("aweme", out var aw)) continue;
 
-                string raw = aw.ValueKind == JsonValueKind.String
-                    ? aw.GetString() ?? ""
-                    : aw.GetRawText();
-                if (raw.Length < 10) continue;
+                    string raw = aw.ValueKind == JsonValueKind.String
+                        ? aw.GetString() ?? ""
+                        : aw.GetRawText();
+                    if (raw.Length < 10) continue;
 
-                var item = JsonSerializer.Deserialize<Aweme>(raw, JsonOptions);
-                if (item is not null && !string.IsNullOrEmpty(item.Id)) list.Add(item);
+                    var item = JsonSerializer.Deserialize<Aweme>(raw, JsonOptions);
+                    if (item is not null && !string.IsNullOrEmpty(item.Id)) list.Add(item);
+                }
+            }
+
+            // ---- 结构二：aweme_list（喜欢 / 收藏 / tab 流）----
+            // 元素可能是**对象**，也可能是**JSON 字符串**——收藏接口给的就是字符串，
+            // 只处理对象的话会解析出 0 条（响应 1.7 MB 却报"没有内容"）。
+            if (list.Count == 0
+                && doc.RootElement.TryGetProperty("aweme_list", out var al)
+                && al.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var a in al.EnumerateArray())
+                {
+                    string raw = a.ValueKind switch
+                    {
+                        JsonValueKind.String => a.GetString() ?? "",
+                        JsonValueKind.Object => a.GetRawText(),
+                        _ => "",
+                    };
+                    if (raw.Length < 10) continue;
+
+                    // **单条失败只跳过这一条**：以前整个循环共用一个 try，
+                    // 收藏里只要有一条字段对不上，整页 10 条全丢，报"没有内容"。
+                    try
+                    {
+                        var item = JsonSerializer.Deserialize<Aweme>(raw, JsonOptions);
+                        if (item is not null && !string.IsNullOrEmpty(item.Id)) list.Add(item);
+                    }
+                    catch (JsonException) { }
+                }
             }
         }
         catch (JsonException)
@@ -747,6 +807,32 @@ public sealed class DouyinClient : IDisposable
 
         if (!session.IsLoggedIn) return false;
 
+        // ---- 主探针：profile/self ----
+        // 这个接口对"登录态不被服务端认可"会明确回 status_code=8「用户未登录」，
+        // 比点赞探针可靠得多：点赞会被风控静默丢弃（status_code 仍是 0），
+        // 拿 0 去判断"已登录"就是自欺欺人——2026-10-26 实测，浏览器里
+        // 页面已经显示"未登录"，点赞探针却一直说正常。
+        try
+        {
+            var (_, selfBody) = await GetRawAsync(
+                "/aweme/v1/web/user/profile/self/", null, useWebSign: true, ct: ct);
+
+            if (TryReadStatusCode(selfBody, out int selfCode))
+            {
+                if (selfCode == 8)
+                {
+                    ReportLoginExpired();
+                    return false;
+                }
+                if (selfCode == 0) return true;
+            }
+        }
+        catch
+        {
+            // profile/self 报错不影响后面的兜底判断
+        }
+
+        // ---- 兜底：点赞不存在的作品，看会不会回 8 ----
         int code = await DiggRawAsync("7000000000000000000", true, ct);
         if (code < 0) return null;
         if (code == 8)
@@ -755,6 +841,26 @@ public sealed class DouyinClient : IDisposable
             return false;
         }
         return true;
+    }
+
+    /// <summary>从响应体里读 status_code；不是 JSON 对象或没有这个字段就返回 false。</summary>
+    private static bool TryReadStatusCode(string body, out int code)
+    {
+        code = -1;
+        if (body.Length < 2 || body.TrimStart()[0] != '{') return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("status_code", out var v) && v.ValueKind == JsonValueKind.Number)
+            {
+                code = v.GetInt32();
+                return true;
+            }
+        }
+        catch (JsonException) { }
+
+        return false;
     }
 
     /// <summary>点赞请求本体，返回 status_code（-1 表示请求失败）。</summary>
@@ -1359,6 +1465,227 @@ public sealed class DouyinClient : IDisposable
         {
             sw.Stop();
             return new StreamProbe(false, 0, "?", sw.ElapsedMilliseconds, "?", ex.Message);
+        }
+    }
+
+    // ================= 喜欢 / 收藏（2026-10-26 实测打通）=================
+
+    /// <summary>自己的 sec_uid。登录后从 profile/self 取一次就缓存。</summary>
+    private string _selfSecUid = "";
+
+    /// <summary>第一个收藏夹的 id（"我的收藏"默认夹）。</summary>
+    private string _collectsId = "";
+
+    /// <summary>
+    /// 拿自己的 sec_uid。
+    ///
+    /// **只有登录有效时才有**：登录态失效时 profile/self 返回 <c>status_code=8</c>，
+    /// user 是 null。之前误以为"这个接口另有门槛、sec_uid 只能靠浏览器抠"，
+    /// 其实登录一恢复它就正常返回了（2026-10-26 更正）。
+    /// </summary>
+    public async Task<string> GetSelfSecUidAsync(CancellationToken ct = default)
+    {
+        if (_selfSecUid.Length > 0) return _selfSecUid;
+
+        try
+        {
+            var (_, body) = await GetRawAsync(
+                "/aweme/v1/web/user/profile/self/", null, useWebSign: true, ct: ct);
+            if (body.Length == 0) return "";
+
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("user", out var user) &&
+                user.ValueKind == JsonValueKind.Object &&
+                user.TryGetProperty("sec_uid", out var su) && su.ValueKind == JsonValueKind.String)
+            {
+                _selfSecUid = su.GetString() ?? "";
+                if (_selfSecUid.Length > 0)
+                {
+                    string nick = user.TryGetProperty("nickname", out var nk) ? nk.GetString() ?? "" : "";
+                    Log?.Invoke($"已取到自己的 sec_uid（{(nick.Length > 0 ? nick : "?")}）");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log?.Invoke("取 sec_uid 失败：" + ex.Message);
+        }
+
+        return _selfSecUid;
+    }
+
+    /// <summary>登录后清缓存（重新登录换了账号，sec_uid 也会变）。</summary>
+    public void ClearSelfIdentity()
+    {
+        _selfSecUid = "";
+        _collectsId = "";
+    }
+
+    /// <summary>
+    /// 喜欢列表。
+    /// <paramref name="maxCursor"/> 传上一次响应里的 <c>max_cursor</c>（毫秒时间戳），
+    /// 首次传 "0"。传页码会一直拿到第一页——这是实测踩过的坑。
+    /// </summary>
+    public async Task<PagedResult> GetLikedAsync(
+        string secUid, string maxCursor = "0", int count = 20, CancellationToken ct = default)
+    {
+        if (secUid.Length == 0) return PagedResult.Fail("没有 sec_uid（未登录）");
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("sec_user_id", secUid),
+            new("max_cursor", maxCursor),
+            new("count", count.ToString()),
+            new("publish_video_strategy_type", "2"),
+        };
+
+        return await GetPagedAsync("/aweme/v1/web/aweme/favorite/", ps, "max_cursor", ct);
+    }
+
+    /// <summary>拿第一个收藏夹 id（"我的收藏"）。</summary>
+    public async Task<string> GetDefaultCollectsIdAsync(CancellationToken ct = default)
+    {
+        if (_collectsId.Length > 0) return _collectsId;
+
+        try
+        {
+            var (_, body) = await GetRawAsync("/aweme/v1/web/collects/list/", new[]
+            {
+                new KeyValuePair<string, string>("count", "20"),
+                new KeyValuePair<string, string>("cursor", "0"),
+            }, useWebSign: true, ct: ct);
+
+            if (body.Length == 0) return "";
+
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("collects_list", out var list) &&
+                list.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var g in list.EnumerateArray())
+                {
+                    // 优先 collects_id_str（字符串形式），退回数字形式
+                    if (g.TryGetProperty("collects_id_str", out var s) && s.ValueKind == JsonValueKind.String)
+                    {
+                        _collectsId = s.GetString() ?? "";
+                    }
+                    else if (g.TryGetProperty("collects_id", out var n))
+                    {
+                        _collectsId = n.ValueKind == JsonValueKind.String ? n.GetString() ?? "" : n.ToString();
+                    }
+
+                    if (_collectsId.Length > 0)
+                    {
+                        string name = g.TryGetProperty("collects_name", out var nm) ? nm.GetString() ?? "" : "";
+                        string total = g.TryGetProperty("total_number", out var tn) ? tn.ToString() : "?";
+                        Log?.Invoke($"收藏夹「{name}」{total} 条");
+                        break;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log?.Invoke("取收藏夹失败：" + ex.Message);
+        }
+
+        return _collectsId;
+    }
+
+    /// <summary>
+    /// 收藏夹里的作品。
+    /// 参数名是 <c>collects_id</c>（带 s）——传 <c>collect_id</c> 会返回
+    /// <c>aweme_list:null</c>，不报错就是空，很难查。
+    /// </summary>
+    public async Task<PagedResult> GetCollectedAsync(
+        string collectsId, string cursor = "0", int count = 20, CancellationToken ct = default)
+    {
+        if (collectsId.Length == 0) return PagedResult.Fail("没有收藏夹（未登录或没有收藏）");
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("collects_id", collectsId),
+            new("cursor", cursor),
+            new("count", count.ToString()),
+        };
+
+        return await GetPagedAsync("/aweme/v1/web/collects/video/list/", ps, "cursor", ct);
+    }
+
+    /// <summary>喜欢/收藏共用的请求+解析（都要 webSign）。</summary>
+    private async Task<PagedResult> GetPagedAsync(
+        string path, List<KeyValuePair<string, string>> ps,
+        string cursorField, CancellationToken ct)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+
+        ps.AddRange(_profile.PlatformParams());
+        ps.Add(new("webid", _profile.EffectiveWebId));
+
+        string uifid = session.EffectiveUifid;
+        if (!string.IsNullOrEmpty(uifid)) ps.Add(new("uifid", uifid));
+        ps.Add(new("msToken", session.MsToken));
+
+        string query = UrlCodec.ToQuery(ps);
+        string abogus = _signer.SignQuery(query, "", "www.douyin.com");
+        query += $"&a_bogus={UrlCodec.Quote(abogus)}" +
+                 $"&verifyFp={session.EffectiveSvWebId}&fp={session.EffectiveSvWebId}";
+
+        string url = WebSign.SignUrl("https://www.douyin.com" + path, query, session.EffectiveUifid);
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            AddBrowserHeaders(req, session);
+            AddSecsdkHeaders(req);
+
+            using var resp = await _http.SendAsync(req, ct);
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            sw.Stop();
+            PickUpTokens(resp, session);
+
+            if (!resp.IsSuccessStatusCode)
+                return PagedResult.Fail($"HTTP {(int)resp.StatusCode}，{body.Length} 字节", sw.ElapsedMilliseconds);
+
+            var items = ParseFeed(body);
+            string next = "";
+            bool hasMore = false;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty(cursorField, out var c) && c.ValueKind == JsonValueKind.Number)
+                    next = c.GetInt64().ToString();
+                if (doc.RootElement.TryGetProperty("has_more", out var hm))
+                    hasMore = hm.ValueKind switch
+                    {
+                        JsonValueKind.Number => hm.GetInt64() != 0,
+                        JsonValueKind.True => true,
+                        _ => false,
+                    };
+            }
+            catch (JsonException) { }
+
+            if (items.Count == 0)
+                return PagedResult.Fail($"没有内容（{body.Length} 字节）", sw.ElapsedMilliseconds);
+
+            Log?.Invoke($"{path} {items.Count} 条 / {sw.ElapsedMilliseconds}ms");
+            return new PagedResult(items, true, "", sw.ElapsedMilliseconds, next, hasMore);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 除了主动取消，什么异常都转成"加载失败"返回。
+            // 以前只接 HttpRequestException，空引用之类的会直接冒到界面上，
+            // 用户只看到一句 "Object reference not set..."，日志里也没有堆栈。
+            sw.Stop();
+            Log?.Invoke($"{path} 失败：{ex.GetType().Name} {ex.Message}");
+            return PagedResult.Fail(ex.Message, sw.ElapsedMilliseconds);
         }
     }
 

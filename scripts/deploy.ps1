@@ -3,9 +3,12 @@
 # 用法：  powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
 #         powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1 -Target "E:\某处\DouyinDesktop"
 #
-# 只覆盖程序本身和两个文档：
-#   DouyinDesktop.exe / 使用说明.txt / diagnose.bat
+# 只覆盖程序本身和诊断脚本：
+#   DouyinDesktop.exe / diagnose.bat
 # **不碰** assets\（mpv，115MB，重复复制纯属浪费）和 data\（登录态、设置、缓存）。
+#
+# 说明文档不再随安装包分发——操作手册就是 GitHub 的 README，
+# 以前那份 使用说明.txt 和它高度重复，2026-10-26 删掉了。
 
 param(
     [string]$Target = 'D:\Douyin_Desktop_2.0'
@@ -45,23 +48,19 @@ if ($LASTEXITCODE -ne 0) { Write-Host '[x] 发布失败' -ForegroundColor Red; e
 Get-ChildItem $out -Filter '*.pdb' | Remove-Item -Force
 Get-ChildItem $out -Filter 'Microsoft.Web.WebView2.*.xml' | Remove-Item -Force
 
-# 使用说明.txt / diagnose.bat 不在源码里，publish 不会带。
-# 它们的**唯一来源**是 packaging\（进版本库，改了这里才会生效）。
+# 使用说明 / diagnose.bat 不在源码里，publish 不会带。
+# diagnose.bat 的唯一来源是 packaging\（进版本库，改了这里才会生效）。
 $pkg = Join-Path $root 'packaging'
 if (Test-Path $pkg) {
     Copy-Item (Join-Path $pkg '*') $out -Force
-    Write-Host '      已从 packaging\ 补齐说明文件' -ForegroundColor DarkGray
-} else {
-    Write-Host '[!] 没有 packaging\ 目录，安装包会缺使用说明.txt' -ForegroundColor Yellow
+    Write-Host '      已从 packaging\ 补齐诊断脚本' -ForegroundColor DarkGray
 }
 
 Write-Host '[2/3] 复制到安装目录…' -ForegroundColor Cyan
-$files = @('DouyinDesktop.exe', '使用说明.txt', 'diagnose.bat')
+$files = @('DouyinDesktop.exe', 'diagnose.bat')
 foreach ($f in $files) {
     $src = Join-Path $out $f
     if (-not (Test-Path $src)) {
-        # 这两个文件不在源码里，是手工放进 dist\pkg 的。
-        # 静默跳过会让人以为更新了、实际安装目录还是旧的说明文档——所以要喊出来。
         Write-Host ("      [!] 缺少 {0}：publish 输出里没有，安装目录这一项不会更新" -f $f) -ForegroundColor Yellow
         continue
     }
