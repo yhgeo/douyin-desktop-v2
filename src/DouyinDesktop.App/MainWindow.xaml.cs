@@ -594,7 +594,7 @@ public partial class MainWindow : Window
 
     // ================= 推荐流 =================
 
-    private async Task LoadFeedAsync(bool reset = false)
+    private async Task LoadFeedAsync(bool reset = false, int target = 10)
     {
         if (_feedLoading) return;
         _feedLoading = true;
@@ -682,7 +682,7 @@ public partial class MainWindow : Window
                 // 关键：**每轮拉完立刻并入列表并开始播**，不等凑满 10 条——
                 // 否则过滤很严时要干等 6 轮（十几秒）才出画面。
                 // 拉的是 JSON（地址/标签/统计），**不下载视频**。
-                const int Target = 10;
+                // target：这一趟至少要凑多少条**新增**。首次加载 10 条，补货只要 3 条。
                 const int MaxRounds = 6;
 
                 // 标签过滤（2026-10-25 恢复）。
@@ -700,13 +700,14 @@ public partial class MainWindow : Window
                 // 过滤全空时要能说清"扫到了什么"，否则用户只会看到"没剩下内容"
                 var tagHits = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-                for (int round = 0; round < MaxRounds && added < Target; round++)
+                for (int round = 0; round < MaxRounds && added < target; round++)
                 {
-                    // 两个推荐接口交替用：内容池不同，混着拉能增加多样性
-                    var result = _useScrollFeed
-                        ? await _client.GetFeedScrollAsync(_settings.FeedBatchSize, _refreshIndex++)
-                        : await _client.GetFeedAsync(_settings.FeedBatchSize, seen);
-                    _useScrollFeed = !_useScrollFeed;
+                    // **只用 module/feed**（2026-10-25 改）。
+                    //
+                    // 以前和 tab/feed 交替：但 tab/feed 不传 presented_ids，
+                    // 每次返回的内容重复率极高（实测 6 轮 13 秒只新增 1–2 条），
+                    // 而且每轮只有 1–6 条。module/feed 支持去重、每轮 8–10 条、内容也更多样。
+                    var result = await _client.GetFeedAsync(_settings.FeedBatchSize, seen);
                     rounds++;
 
                     if (!result.Success)
@@ -1142,8 +1143,9 @@ public partial class MainWindow : Window
     {
         // 作者主页模式下不补推荐流——混进来就不是"这个人的作品"了
         if (_feedLoading || _authorMode) return;
+        // 补货只要几条就够，别按"凑 10 条"来（那是首次加载的标准）
         if (_items.Count - _index <= 6)
-            _ = LoadFeedAsync();
+            _ = LoadFeedAsync(target: 3);
     }
 
     /// <summary>
