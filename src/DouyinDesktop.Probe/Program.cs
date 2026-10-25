@@ -2078,6 +2078,77 @@ if (args.Length > 0 && args[0] == "dumpcollect")
     return 0;
 }
 
+// 收藏作品有哪些可用字段（做备份功能前的调研）：dotnet run --project src/DouyinDesktop.Probe -- favfields
+if (args.Length > 0 && args[0] == "favfields")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var c = DouyinClient.Create();
+    c.Log += m => Console.WriteLine("    " + m);
+
+    string cid = await c.GetDefaultCollectsIdAsync();
+    var (st, body) = await c.GetRawAsync("/aweme/v1/web/collects/video/list/", new[]
+    {
+        new KeyValuePair<string, string>("collects_id", cid),
+        new KeyValuePair<string, string>("count", "1"),
+        new KeyValuePair<string, string>("cursor", "0"),
+    }, useWebSign: true);
+
+    using var doc = JsonDocument.Parse(body);
+    if (!doc.RootElement.TryGetProperty("aweme_list", out var al) || al.ValueKind != JsonValueKind.Array
+        || al.GetArrayLength() == 0)
+    {
+        Console.WriteLine("没拿到作品：" + Short(body, 200));
+        return 1;
+    }
+
+    var aw = al.EnumerateArray().First();
+    var keys = aw.EnumerateObject().Select(p => p.Name).ToList();
+    Console.WriteLine($"顶层字段 {keys.Count} 个：");
+    for (int i = 0; i < keys.Count; i += 5)
+        Console.WriteLine("  " + string.Join("  ", keys.Skip(i).Take(5)));
+
+    Console.WriteLine("\n可能和「收藏/时间/媒体」有关的字段：");
+    foreach (var p in aw.EnumerateObject())
+    {
+        string n = p.Name;
+        if (!(n.Contains("collect") || n.Contains("time") || n.Contains("image")
+              || n.Contains("music") || n.Contains("video") || n.Contains("statistics")
+              || n.Contains("text_extra") || n.Contains("video_tag") || n.Contains("author")))
+            continue;
+
+        string val = p.Value.ValueKind switch
+        {
+            JsonValueKind.Null => "null",
+            JsonValueKind.Array => $"[{p.Value.GetArrayLength()} 项]",
+            JsonValueKind.Object => "(对象)",
+            _ => Short(p.Value.ToString(), 40),
+        };
+        Console.WriteLine($"  {n,-22} {p.Value.ValueKind,-8} {val}");
+    }
+
+    // 互动数据 + 作者
+    if (aw.TryGetProperty("statistics", out var s) && s.ValueKind == JsonValueKind.Object)
+    {
+        Console.WriteLine("\nstatistics：");
+        foreach (var p in s.EnumerateObject()) Console.WriteLine($"  {p.Name} = {p.Value}");
+    }
+    if (aw.TryGetProperty("author", out var au) && au.ValueKind == JsonValueKind.Object)
+    {
+        Console.WriteLine("\nauthor：");
+        foreach (string k in new[] { "uid", "sec_uid", "nickname", "unique_id", "signature" })
+            if (au.TryGetProperty(k, out var v)) Console.WriteLine($"  {k} = {Short(v.ToString(), 60)}");
+    }
+    if (aw.TryGetProperty("video", out var vd) && vd.ValueKind == JsonValueKind.Object)
+    {
+        Console.WriteLine("\nvideo：");
+        foreach (string k in new[] { "duration", "width", "height", "ratio", "bit_rate" })
+            if (vd.TryGetProperty(k, out var v))
+                Console.WriteLine($"  {k} = {(v.ValueKind == JsonValueKind.Array ? $"[{v.GetArrayLength()} 项]" : Short(v.ToString(), 50))}");
+    }
+
+    return 0;
+}
+
 // 登录态 vs 游客态的关注流：内容一样就说明服务端根本没认登录
 // dotnet run --project src/DouyinDesktop.Probe -- followguest
 if (args.Length > 0 && args[0] == "followguest")
