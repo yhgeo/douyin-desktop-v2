@@ -1502,6 +1502,10 @@ public sealed class DouyinClient : IDisposable
             $"https://www.douyin.com/search/{Uri.EscapeDataString(keyword)}" +
             $"?publish_time={publishTime}&sort_type={sortType}&source=tab_search&type=video");
 
+        // 抓包发现浏览器把 uifid 当**请求头**发（不只是 query 参数），补上
+        if (!string.IsNullOrEmpty(uifid))
+            req.Headers.TryAddWithoutValidation("uifid", uifid);
+
         using var resp = await _http.SendAsync(req, ct);
         string body = await resp.Content.ReadAsStringAsync(ct);
         return ((int)resp.StatusCode, body);

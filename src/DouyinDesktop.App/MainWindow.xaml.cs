@@ -85,6 +85,9 @@ public partial class MainWindow : Window
 
     /// <summary>当前这条的平台标签（video_tag）。只有详情接口给，异步补。</summary>
     private IReadOnlyList<string> _officialTags = Array.Empty<string>();
+
+    /// <summary>当前列表里被标签规则筛掉了多少条（reset 时清零）。</summary>
+    private int _filteredCount;
     private CancellationTokenSource? _danmakuCts;
     private readonly Dictionary<string, DanmakuItem> _danmakuItems = new();
 
@@ -602,6 +605,7 @@ public partial class MainWindow : Window
                 _items.Clear();
                 _presented.Clear();
                 _index = -1;
+                _filteredCount = 0;
             }
 
             SetStatus("正在获取推荐…");
@@ -730,6 +734,7 @@ public partial class MainWindow : Window
                         seen.Add(a.Id);
                     }
                     added += _items.Count - before;
+                    _filteredCount += result.Items.Count - kept.Count;
 
                     // 第一轮只要有内容就先播上，后面的轮次在后台继续补。
                     //
@@ -2345,9 +2350,20 @@ public partial class MainWindow : Window
     };
 
     private void UpdateIndexLabel()
-        => IndexLabel.Text = _index < 0 || _items.Count == 0
-            ? ""
+    {
+        if (IndexLabel is null) return;
+
+        if (_index < 0 || _items.Count == 0)
+        {
+            IndexLabel.Text = "";
+            return;
+        }
+
+        // 筛掉多少直接写在序号旁边 —— 用户能一眼看出过滤规则是不是太严
+        IndexLabel.Text = _filteredCount > 0
+            ? $"{_index + 1} / {_items.Count}（筛掉 {_filteredCount}）"
             : $"{_index + 1} / {_items.Count}";
+    }
 
     /// <summary>
     /// 按当前视频的宽高比，把画布摆到 VideoHost 里（留黑边）。

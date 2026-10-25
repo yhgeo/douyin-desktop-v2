@@ -23,6 +23,13 @@ public partial class App : Application
             return;
         }
 
+        // --capture-search=关键词：屏幕外打开搜索页，抓真实搜索请求（URL + 全部头）
+        if (e.Args.FirstOrDefault(a => a.StartsWith("--capture-search=", StringComparison.Ordinal)) is { } cs)
+        {
+            RunCaptureSearch(cs["--capture-search=".Length..]);
+            return;
+        }
+
         // --diagnose：只开诊断窗口，不启动主界面
         // --settings：只开设置窗口（调界面时用，不用先起播放器）
         // （StartupUri 已在 App.xaml 里去掉，否则会两个窗口一起开）
@@ -38,6 +45,25 @@ public partial class App : Application
 
         MainWindow = win;
         win.Show();
+    }
+
+    /// <summary>屏幕外打开一次搜索页，抓真实搜索请求。</summary>
+    private async void RunCaptureSearch(string keyword)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(keyword)) keyword = "美女";
+
+            AppLog.Write($"[抓搜索] 开始，关键词 {keyword}");
+            bool ok = await SearchCapture.CaptureAsync(keyword);
+            AppLog.Write(ok ? "[抓搜索] 完成" : "[抓搜索] 失败");
+            Shutdown(ok ? 0 : 1);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("[抓搜索] 异常：" + ex);
+            Shutdown(1);
+        }
     }
 
     /// <summary>
