@@ -531,7 +531,11 @@ if (args.Length > 0 && args[0] == "feedmix")
     return 0;
 }
 
-// 搜索接口试探：dotnet run --project src/DouyinDesktop.Probe -- search 美女
+// 搜索接口：dotnet run --project src/DouyinDesktop.Probe -- search 美女
+//
+// 参数表来自 https://zhuanlan.zhihu.com/p/703258418
+// 关键：这个接口用的是 **x_bogus**（不是 a_bogus），项目里目前只有 a_bogus。
+// 先补齐完整参数 + a_bogus 试，看 2483 是"参数不全"还是"签名不对"。
 if (args.Length > 0 && args[0] == "search")
 {
     Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -540,57 +544,54 @@ if (args.Length > 0 && args[0] == "search")
     using var c = DouyinClient.Create();
     c.Log += m => Console.WriteLine("    " + m);
 
-    var cases = new (string Path, List<KeyValuePair<string, string>> Extra)[]
+    var extra = new List<KeyValuePair<string, string>>
     {
-        ("/aweme/v1/web/general/search/single/", new()
-        {
-            new("keyword", kw), new("search_channel", "aweme_general"),
-            new("count", "10"), new("offset", "0"), new("search_source", "normal_search"),
-        }),
-        ("/aweme/v1/web/search/item/", new()
-        {
-            new("keyword", kw), new("count", "10"), new("offset", "0"),
-            new("search_channel", "aweme_video_web"),
-        }),
+        new("search_channel", "aweme_video_web"),
+        new("sort_type", "0"),
+        new("publish_time", "0"),
+        new("keyword", kw),
+        new("search_source", "switch_tab"),
+        new("query_correct_type", "1"),
+        new("is_filter_search", "0"),
+        new("from_group_id", ""),
+        new("offset", "0"),
+        new("count", "10"),
     };
 
-    foreach (var (path, extra) in cases)
+    try
     {
-        try
+        var (status, body) = await c.SearchRawAsync(kw);
+
+        Console.WriteLine($"\n=== x_bogus 签名 ===  HTTP {status}  {body.Length} 字节");
+        Console.WriteLine("  " + body[..Math.Min(260, body.Length)].Replace("\n", " "));
+
+        if (body.Length > 2 && body.TrimStart()[0] == '{')
         {
-            var (status, body) = await c.GetRawAsync(path, extra, useWebSign: true,
-                referer: "https://www.douyin.com/search/" + Uri.EscapeDataString(kw));
-            Console.WriteLine($"\n=== {path} ===  HTTP {status}  {body.Length} 字节");
-            if (body.Length == 0) { Console.WriteLine("  (空 body)"); await Task.Delay(1200); continue; }
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("status_code", out var sc))
+                Console.WriteLine($"  status_code = {sc}");
 
-            Console.WriteLine("  " + body[..Math.Min(200, body.Length)].Replace("\n", " "));
-
-            // 数一下能解析出多少条
-            int n = 0;
-            try
+            if (doc.RootElement.TryGetProperty("data", out var arr) && arr.ValueKind == JsonValueKind.Array)
             {
-                using var doc = JsonDocument.Parse(body);
-                foreach (string key in new[] { "data", "aweme_list" })
+                int n = 0;
+                foreach (var node in arr.EnumerateArray())
                 {
-                    if (!doc.RootElement.TryGetProperty(key, out var arr) || arr.ValueKind != JsonValueKind.Array) continue;
-                    foreach (var node in arr.EnumerateArray())
+                    if (!node.TryGetProperty("aweme_info", out var ai)) continue;
+                    n++;
+                    if (n <= 6)
                     {
-                        bool hasAweme = node.TryGetProperty("aweme_info", out _)
-                                     || node.TryGetProperty("aweme", out _)
-                                     || node.TryGetProperty("aweme_id", out _);
-                        if (hasAweme) n++;
+                        string nick = ai.TryGetProperty("author", out var au) && au.TryGetProperty("nickname", out var nn)
+                            ? nn.GetString() ?? "" : "";
+                        Console.WriteLine($"    @{nick}");
                     }
                 }
+                Console.WriteLine($"  → {n} 条作品");
             }
-            catch (JsonException) { }
-
-            Console.WriteLine($"  → 识别到 {n} 条作品节点");
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"\n=== {path} ===  异常：{ex.Message}");
-        }
-        await Task.Delay(1200);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("异常：" + ex.Message);
     }
     return 0;
 }

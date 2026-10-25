@@ -1445,6 +1445,68 @@ public sealed class DouyinClient : IDisposable
         return await resp.Content.ReadAsStringAsync(ct);
     }
 
+    /// <summary>
+    /// 搜索作品。**必须用 x_bogus 签名**——用 a_bogus 会返回 2483「请先登录」。
+    ///
+    /// 参数表来自实测（2026-10）：`sort_type` 0=综合 1=最多赞 2=最新，
+    /// `publish_time` 0=不限 1=一天 7=一周 182=半年。
+    /// 第二页起要带上一页返回的 `search_id`。
+    /// </summary>
+    public async Task<(int Status, string Body)> SearchRawAsync(
+        string keyword, int offset = 0, string? searchId = null,
+        int sortType = 0, int publishTime = 0, CancellationToken ct = default)
+    {
+        var session = await EnsureSessionAsync(ct: ct);
+
+        var ps = new List<KeyValuePair<string, string>>
+        {
+            new("device_platform", "webapp"),
+            new("aid", "6383"),
+            new("channel", "channel_pc_web"),
+            new("search_channel", "aweme_video_web"),
+            new("sort_type", sortType.ToString()),
+            new("publish_time", publishTime.ToString()),
+            new("keyword", keyword),
+            new("search_source", "switch_tab"),
+            new("query_correct_type", "1"),
+            new("is_filter_search", sortType > 0 || publishTime > 0 ? "1" : "0"),
+            new("from_group_id", ""),
+            new("offset", offset.ToString()),
+        };
+
+        if (offset > 0 && !string.IsNullOrEmpty(searchId))
+            ps.Add(new("search_id", searchId));
+
+        ps.Add(new("count", "10"));
+        ps.AddRange(_profile.PlatformParams());
+        ps.Add(new("webid", _profile.EffectiveWebId));
+
+        string uifid = session.EffectiveUifid;
+        if (!string.IsNullOrEmpty(uifid)) ps.Add(new("uifid", uifid));
+        ps.Add(new("msToken", session.MsToken));
+
+        string query = UrlCodec.ToQuery(ps);
+
+        // x_bogus：query + UA + 时间戳。UA 必须和请求头发出去的完全一致
+        uint ts = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        string xb = XBogus.Sign(query, "", _profile.UserAgent, ts);
+
+        // x_bogus 里含 / 和 +，**不能 URL 编码**（编码后值就变了，服务端校验不过）
+        string url = "https://www.douyin.com/aweme/v1/web/search/item/?" + query +
+                     $"&X-Bogus={xb}";
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        AddBrowserHeaders(req, session);
+        req.Headers.Remove("Referer");
+        req.Headers.TryAddWithoutValidation("Referer",
+            $"https://www.douyin.com/search/{Uri.EscapeDataString(keyword)}" +
+            $"?publish_time={publishTime}&sort_type={sortType}&source=tab_search&type=video");
+
+        using var resp = await _http.SendAsync(req, ct);
+        string body = await resp.Content.ReadAsStringAsync(ct);
+        return ((int)resp.StatusCode, body);
+    }
+
     // ================= 请求头 =================
 
     /// <summary>

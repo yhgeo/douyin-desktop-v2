@@ -681,10 +681,12 @@ public partial class MainWindow : Window
                 const int Target = 10;
                 const int MaxRounds = 6;
 
-                // **暂不在推荐流里过滤**（2026-10-25 用户决定）。
-                // 实测：推荐流内容与兴趣脱节时（冷启动/降级），过滤会把整页筛空，
-                // 比"看到几条不想要的"体验更差。标签分组保留，将来给搜索模式用。
-                var rule = new TagRule();
+                // 标签过滤（2026-10-25 恢复）。
+                //
+                // 之前撤掉是因为设备标识被反复重置、推荐流内容与兴趣完全脱节，
+                // 过滤会把整页筛空。设备问题修好后推荐恢复正常，过滤能命中。
+                // 配套的"边拉边展示"保证筛得再狠也不会干等。
+                var rule = CurrentTagRule;
                 var seen = new HashSet<string>(_presented, StringComparer.Ordinal);
                 int added = 0;
                 int rounds = 0;
