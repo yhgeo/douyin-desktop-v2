@@ -38,14 +38,16 @@
                 <StackPanel Margin="0,14,0,0">
                     <Button x:Name="NavAccount" Content="账号" Tag="active"
                             Style="{StaticResource NavButton}" Click="OnNavAccount" />
-                    <Button x:Name="NavKeys" Content="快捷键"
-                            Style="{StaticResource NavButton}" Click="OnNavKeys" />
+                    <Button x:Name="NavContent" Content="内容偏好"
+                            Style="{StaticResource NavButton}" Click="OnNavContent" />
                     <Button x:Name="NavTaste" Content="推荐倾向"
                             Style="{StaticResource NavButton}" Click="OnNavTaste" />
+                    <Button x:Name="NavDanmaku" Content="弹幕"
+                            Style="{StaticResource NavButton}" Click="OnNavDanmaku" />
+                    <Button x:Name="NavKeys" Content="快捷键"
+                            Style="{StaticResource NavButton}" Click="OnNavKeys" />
                     <Button x:Name="NavBackup" Content="备份"
                             Style="{StaticResource NavButton}" Click="OnNavBackup" />
-                    <Button x:Name="NavPlay" Content="播放"
-                            Style="{StaticResource NavButton}" Click="OnNavPlay" />
                     <Button x:Name="NavAbout" Content="关于"
                             Style="{StaticResource NavButton}" Click="OnNavAbout" />
                 </StackPanel>
@@ -155,7 +157,7 @@
                         <TextBlock Text="推荐倾向" FontSize="15" FontWeight="SemiBold" />
                         <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,8,0,0"
                                    TextWrapping="Wrap" LineHeight="18"
-                                   Text="拉 40 条推荐视频，逐条读取平台标签（抖音自己的三级分类，如「美食 → 美食探店 → 餐厅探店」），看平台现在正在推给你什么。&#10;大约需要半分钟——平台标签只在详情接口里，每条要多花 0.6 秒。拿不到平台标签的会退回用作者标签。" />
+                                   Text="逐条读取平台标签（抖音三级分类，如「美食 → 美食探店 → 餐厅探店」），看平台正在推什么。每条约 0.6 秒。" />
 
                         <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
                             <Button x:Name="TasteRunBtn" Content="开始分析" Padding="16,6" FontSize="12"
@@ -204,7 +206,7 @@
 
                                 <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,16,0,0"
                                            TextWrapping="Wrap" LineHeight="18"
-                                           Text="提示：多跑几次结果会更稳。同一批里出现「仅某一个号占三成以上」时，说明这一屏其实是被单个账号刷屏，不代表整体倾向。" />
+                                           Text="多跑几次更稳。单个账号占三成以上时，说明这一屏被刷屏了，不代表整体倾向。" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -216,6 +218,9 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="28,26,28,24">
                         <TextBlock Text="备份" FontSize="15" FontWeight="SemiBold" />
+                        <TextBlock x:Name="BackupLast" FontSize="11" Foreground="#5A5A66"
+                                   Margin="0,7,0,0" TextWrapping="Wrap"
+                                   Text="还没有备份过" />
 
                         <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,14,0,0">
                             <StackPanel>
@@ -223,7 +228,7 @@
                                            Foreground="{StaticResource TextBrush}" />
                                 <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,8,0,0"
                                            TextWrapping="Wrap" LineHeight="19"
-                                           Text="视频文件动辄几十上百 MB，几百条就是几十 GB，而且会过期。&#10;备份只存「作品 ID」和「视频 ID」——这两个是永久标识。以后想看，用 ID 重新取一次播放地址就行，几毫秒的事。&#10;网页链接也是永久的：只要作品没被作者删掉，点开就能看。&#10;唯一的失效场景是作者删了作品，那种情况谁都救不回来。" />
+                                           Text="视频几十上百 MB，几百条就是几十 GB。备份只存「作品 ID」和「视频 ID」——永久标识，以后用它们重取播放地址即可（几毫秒）。网页链接同样永久，除非作者删了作品。" />
                             </StackPanel>
                         </Border>
 
@@ -233,10 +238,10 @@
                                            Foreground="{StaticResource TextBrush}" />
                                 <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,8,0,0"
                                            TextWrapping="Wrap" LineHeight="19"
-                                           Text="作品 ID / 视频 ID / 网页链接 / 文案 / 发布时间&#10;作者昵称、uid、sec_uid / 点赞·评论·分享·收藏数&#10;时长、分辨率、封面地址 / 话题标签、平台标签 / 背景音乐" />
-                                <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,8,0,0"
+                                           Text="ID、链接、文案、发布时间、作者、互动数据、时长分辨率、封面、标签、音乐" />
+                                <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,6,0,0"
                                            TextWrapping="Wrap" LineHeight="19"
-                                           Text="⚠ 抖音不返回「收藏时间」，只能按接口给的顺序（大致从新到旧）排列。" />
+                                           Text="⚠ 抖音不返回「收藏时间」，只能按接口顺序（大致从新到旧）排列。" />
                             </StackPanel>
                         </Border>
 
@@ -268,181 +273,172 @@
                 </ScrollViewer>
             </Grid>
 
-            <!-- 播放页 -->
-            <Grid x:Name="PagePlay" Grid.Column="1" Visibility="Collapsed">
+            <!-- 内容偏好页 -->
+            <Grid x:Name="PageContent" Grid.Column="1" Visibility="Collapsed">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel Margin="28,26,28,24">
-                    <TextBlock Text="播放" FontSize="15" FontWeight="SemiBold" />
+                    <StackPanel Margin="28,26,28,24">
+                        <TextBlock Text="内容偏好" FontSize="15" FontWeight="SemiBold" />
+                        <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,7,0,0"
+                                   TextWrapping="Wrap" LineHeight="18"
+                                   Text="按话题标签筛选推荐流。点上面的分组切换；一行写一个标签：直接写 = 只看这类，- 开头 = 屏蔽这类。" />
 
-                    <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,14,0,0">
-                        <StackPanel>
-                            <CheckBox x:Name="ImageOnlyCheck" Content="只看图集（跳过视频）"
-                                      Foreground="{StaticResource TextBrush}" FontSize="13"
-                                      Checked="OnImageOnlyChanged" Unchecked="OnImageOnlyChanged" />
-                            <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,9,0,0"
-                                       TextWrapping="Wrap" LineHeight="18"
-                                       Text="⚠ 2026-10-25 实测：推荐流连续 80 条里图集为 0，这个开关目前大概率拉不到内容。要看图集请按 Tab 切到「主页」，从作者作品里找。" />
-                        </StackPanel>
-                    </Border>
+                        <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,14,0,0">
+                            <StackPanel>
+                                <WrapPanel x:Name="GroupTabs" Margin="0,0,0,2" />
 
-                    <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,14,0,0">
-                        <StackPanel>
-                            <TextBlock Text="内容偏好（标签分组）" Foreground="{StaticResource TextBrush}" FontSize="13" />
-                            <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,9,0,0"
-                                       TextWrapping="Wrap" LineHeight="18"
-                                       Text="点上面的分组切换，下面的框里一行写一个标签：直接写 = 只看这类，- 开头 = 屏蔽这类。&#10;匹配是包含关系（“短剧”能命中“热播短剧”）。" />
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <TextBlock Text="组名" FontSize="11" Foreground="#5A5A66" VerticalAlignment="Center" />
+                                    <TextBox x:Name="GroupNameBox" Width="128" Margin="8,0,0,0"
+                                             Background="#101016" Foreground="{StaticResource TextBrush}"
+                                             BorderBrush="#2A2A34" CaretBrush="{StaticResource TextBrush}"
+                                             FontSize="12" Padding="6,4"
+                                             TextChanged="OnGroupNameChanged" />
+                                    <Button Content="＋ 新建" Margin="10,0,0,0" Padding="10,4" FontSize="11"
+                                            Cursor="Hand" BorderThickness="0"
+                                            Background="#22222C" Foreground="#C8C8D2"
+                                            Click="OnAddGroup" />
+                                    <Button Content="删除" Margin="8,0,0,0" Padding="10,4" FontSize="11"
+                                            Cursor="Hand" BorderThickness="0"
+                                            Background="#22222C" Foreground="#8A8A96"
+                                            Click="OnDeleteGroup" />
+                                </StackPanel>
 
-                            <!-- 分组 Tab：动态生成 -->
-                            <WrapPanel x:Name="GroupTabs" Margin="0,10,0,2" />
-
-                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                <TextBlock Text="组名" FontSize="11" Foreground="#5A5A66" VerticalAlignment="Center" />
-                                <TextBox x:Name="GroupNameBox" Width="128" Margin="8,0,0,0"
+                                <TextBox x:Name="GroupRulesBox" Margin="0,10,0,0" Height="150"
                                          Background="#101016" Foreground="{StaticResource TextBrush}"
                                          BorderBrush="#2A2A34" CaretBrush="{StaticResource TextBrush}"
-                                         FontSize="12" Padding="6,4"
-                                         TextChanged="OnGroupNameChanged" />
-                                <Button Content="＋ 新建分组" Margin="10,0,0,0" Padding="10,4" FontSize="11"
-                                        Cursor="Hand" BorderThickness="0"
-                                        Background="#22222C" Foreground="#C8C8D2"
-                                        Click="OnAddGroup" />
-                                <Button Content="删除当前组" Margin="8,0,0,0" Padding="10,4" FontSize="11"
-                                        Cursor="Hand" BorderThickness="0"
-                                        Background="#22222C" Foreground="#8A8A96"
-                                        Click="OnDeleteGroup" />
+                                         AcceptsReturn="True" TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         FontSize="12" Padding="8,6"
+                                         FontFamily="Consolas, Microsoft YaHei"
+                                         TextChanged="OnGroupRulesChanged" />
+                                <TextBlock x:Name="GroupHint" FontSize="11" Foreground="#5A5A66" Margin="0,8,0,0"
+                                           TextWrapping="Wrap" LineHeight="18" />
                             </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
 
-                            <TextBox x:Name="GroupRulesBox" Margin="0,10,0,0" Height="92"
-                                     Background="#101016" Foreground="{StaticResource TextBrush}"
-                                     BorderBrush="#2A2A34" CaretBrush="{StaticResource TextBrush}"
-                                     AcceptsReturn="True" TextWrapping="Wrap"
-                                     VerticalScrollBarVisibility="Auto"
-                                     FontSize="12" Padding="8,6"
-                                     FontFamily="Consolas, Microsoft YaHei"
-                                     TextChanged="OnGroupRulesChanged" />
-                            <TextBlock x:Name="GroupHint" FontSize="11" Foreground="#5A5A66" Margin="0,6,0,0" />
+            <!-- 弹幕页 -->
+            <Grid x:Name="PageDanmaku" Grid.Column="1" Visibility="Collapsed">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="28,26,28,24">
+                        <TextBlock Text="弹幕" FontSize="15" FontWeight="SemiBold" />
+                        <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,7,0,0"
+                                   TextWrapping="Wrap" LineHeight="18"
+                                   Text="只有创作者开了弹幕的作品才有。" />
 
+                        <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,14,0,0">
+                            <StackPanel>
+                                <CheckBox x:Name="DanmakuCheck" Content="显示弹幕"
+                                          Foreground="{StaticResource TextBrush}" FontSize="13"
+                                          Checked="OnDanmakuChanged" Unchecked="OnDanmakuChanged" />
 
-                        </StackPanel>
-                    </Border>
+                                <StackPanel x:Name="DanmakuOptions" Margin="0,16,0,0" IsEnabled="False">
 
-                    <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,12,0,0">
-                        <StackPanel>
-                            <CheckBox x:Name="DanmakuCheck" Content="显示弹幕"
-                                      Foreground="{StaticResource TextBrush}" FontSize="13"
-                                      Checked="OnDanmakuChanged" Unchecked="OnDanmakuChanged" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="76" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="显示区域" FontSize="12" Foreground="#8C8C99"
+                                                   VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <Button x:Name="AreaTop" Content="顶部" CommandParameter="top"
+                                                    Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
+                                            <Button x:Name="AreaMiddle" Content="中间" CommandParameter="middle"
+                                                    Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
+                                            <Button x:Name="AreaBottom" Content="底部" CommandParameter="bottom"
+                                                    Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
+                                            <Button x:Name="AreaFull" Content="全屏" CommandParameter="full"
+                                                    Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
+                                        </StackPanel>
+                                    </Grid>
 
-                            <!-- 勾上才可调 -->
-                            <StackPanel x:Name="DanmakuOptions" Margin="0,16,0,0" IsEnabled="False">
+                                    <Grid Margin="0,16,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="76" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="56" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="字号" FontSize="12" Foreground="#8C8C99"
+                                                   VerticalAlignment="Center" />
+                                        <Slider x:Name="FontSlider" Grid.Column="1" Minimum="1" Maximum="6"
+                                                TickFrequency="0.1" IsSnapToTickEnabled="True"
+                                                Style="{StaticResource DarkSlider}"
+                                                ValueChanged="OnDanmakuStyleChanged" />
+                                        <TextBlock x:Name="FontValue" Grid.Column="2" FontSize="12"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
 
-                                <!-- 显示区域 -->
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="76" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="显示区域" FontSize="12" Foreground="#8C8C99"
-                                               VerticalAlignment="Center" />
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                        <Button x:Name="AreaTop" Content="顶部" CommandParameter="top"
-                                                Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
-                                        <Button x:Name="AreaMiddle" Content="中间" CommandParameter="middle"
-                                                Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
-                                        <Button x:Name="AreaBottom" Content="底部" CommandParameter="bottom"
-                                                Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
-                                        <Button x:Name="AreaFull" Content="全屏" CommandParameter="full"
-                                                Style="{StaticResource SegButton}" Click="OnDanmakuAreaClick" />
-                                    </StackPanel>
-                                </Grid>
+                                    <Grid Margin="0,16,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="76" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="56" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="不透明度" FontSize="12" Foreground="#8C8C99"
+                                                   VerticalAlignment="Center" />
+                                        <Slider x:Name="OpacitySlider" Grid.Column="1" Minimum="10" Maximum="100"
+                                                TickFrequency="5" IsSnapToTickEnabled="True"
+                                                Style="{StaticResource DarkSlider}"
+                                                ValueChanged="OnDanmakuStyleChanged" />
+                                        <TextBlock x:Name="OpacityValue" Grid.Column="2" FontSize="12"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
 
-                                <!-- 字号 -->
-                                <Grid Margin="0,14,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="76" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="56" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="字号" FontSize="12" Foreground="#8C8C99"
-                                               VerticalAlignment="Center" />
-                                    <Slider x:Name="FontSlider" Grid.Column="1" Minimum="1" Maximum="6"
-                                            TickFrequency="0.1" IsSnapToTickEnabled="True"
-                                            Style="{StaticResource DarkSlider}"
-                                            ValueChanged="OnDanmakuStyleChanged" />
-                                    <TextBlock x:Name="FontValue" Grid.Column="2" FontSize="12"
-                                               Foreground="{StaticResource TextBrush}"
-                                               HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                </Grid>
+                                    <Grid Margin="0,16,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="76" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="56" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="描边" FontSize="12" Foreground="#8C8C99"
+                                                   VerticalAlignment="Center" />
+                                        <Slider x:Name="OutlineSlider" Grid.Column="1" Minimum="0" Maximum="30"
+                                                TickFrequency="1" IsSnapToTickEnabled="True"
+                                                Style="{StaticResource DarkSlider}"
+                                                ValueChanged="OnDanmakuStyleChanged" />
+                                        <TextBlock x:Name="OutlineValue" Grid.Column="2" FontSize="12"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
 
-                                <!-- 不透明度 -->
-                                <Grid Margin="0,14,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="76" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="56" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="不透明度" FontSize="12" Foreground="#8C8C99"
-                                               VerticalAlignment="Center" />
-                                    <Slider x:Name="OpacitySlider" Grid.Column="1" Minimum="10" Maximum="100"
-                                            TickFrequency="5" IsSnapToTickEnabled="True"
-                                            Style="{StaticResource DarkSlider}"
-                                            ValueChanged="OnDanmakuStyleChanged" />
-                                    <TextBlock x:Name="OpacityValue" Grid.Column="2" FontSize="12"
-                                               Foreground="{StaticResource TextBrush}"
-                                               HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                </Grid>
+                                    <Grid Margin="0,16,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="76" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="56" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="速度" FontSize="12" Foreground="#8C8C99"
+                                                   VerticalAlignment="Center" />
+                                        <Slider x:Name="SpeedSlider" Grid.Column="1" Minimum="4" Maximum="20"
+                                                TickFrequency="0.5" IsSnapToTickEnabled="True"
+                                                Style="{StaticResource DarkSlider}"
+                                                ValueChanged="OnDanmakuStyleChanged" />
+                                        <TextBlock x:Name="SpeedValue" Grid.Column="2" FontSize="12"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
 
-                                <!-- 描边 -->
-                                <Grid Margin="0,14,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="76" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="56" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="描边" FontSize="12" Foreground="#8C8C99"
-                                               VerticalAlignment="Center" />
-                                    <Slider x:Name="OutlineSlider" Grid.Column="1" Minimum="0" Maximum="30"
-                                            TickFrequency="1" IsSnapToTickEnabled="True"
-                                            Style="{StaticResource DarkSlider}"
-                                            ValueChanged="OnDanmakuStyleChanged" />
-                                    <TextBlock x:Name="OutlineValue" Grid.Column="2" FontSize="12"
-                                               Foreground="{StaticResource TextBrush}"
-                                               HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                </Grid>
-
-                                <!-- 速度 -->
-                                <Grid Margin="0,14,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="76" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="56" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="移动速度" FontSize="12" Foreground="#8C8C99"
-                                               VerticalAlignment="Center" />
-                                    <Slider x:Name="SpeedSlider" Grid.Column="1" Minimum="4" Maximum="20"
-                                            TickFrequency="0.5" IsSnapToTickEnabled="True"
-                                            Style="{StaticResource DarkSlider}"
-                                            ValueChanged="OnDanmakuStyleChanged" />
-                                    <TextBlock x:Name="SpeedValue" Grid.Column="2" FontSize="12"
-                                               Foreground="{StaticResource TextBrush}"
-                                               HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                </Grid>
-
-                                <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,14,0,0"
+                        <Border Background="#17171E" CornerRadius="8" Padding="18,16" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="渲染方式" FontSize="13" Foreground="{StaticResource TextBrush}" />
+                                <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,7,0,0"
                                            TextWrapping="Wrap" LineHeight="18"
-                                           Text="只有创作者开启了弹幕的作品才有。弹幕由播放器渲染成字幕轨（视频是独立窗口，界面层盖不上去），所以外观只能是白字黑边、从右往左滚。" />
-
-                                <!-- 渲染方式：默认字幕轨（稳），浮层是实验性的 -->
-                                <CheckBox x:Name="OverlayCheck" Margin="0,12,0,0"
-                                          Content="用浮层渲染（更顺滑，实验性）"
+                                           Text="默认字幕轨，稳定。浮层更顺滑，但窗口层级相关的 bug 多（全屏、多屏、设置对话框），遇到问题就关掉。" />
+                                <CheckBox x:Name="OverlayCheck" Margin="0,10,0,0"
+                                          Content="用浮层渲染（实验性）"
                                           Foreground="{StaticResource TextBrush}" FontSize="12"
                                           Checked="OnOverlayRendererChanged" Unchecked="OnOverlayRendererChanged" />
-                                <TextBlock FontSize="11" Foreground="#5A5A66" Margin="0,6,0,0"
-                                           TextWrapping="Wrap" LineHeight="18"
-                                           Text="默认用字幕轨，稳定。浮层是按显示器刷新率单独画的，弹幕移动更顺，但窗口层级相关的 bug 多（全屏/设置对话框/多屏），遇到问题就关掉这个。" />
                             </StackPanel>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
+                        </Border>
+                    </StackPanel>
                 </ScrollViewer>
             </Grid>
 

@@ -41,11 +41,15 @@ public partial class SettingsWindow : Window
         KeyList.ItemsSource = _rows;
 
         DataPathText.Text = DouyinDesktop.Core.DouyinPaths.DataDirectory;
-        ImageOnlyCheck.IsChecked = settings.ImageOnly;
+        // 图集开关已经从界面上去掉了（推荐流实测 0 图集，留着只会误导），
+        // 但配置项保留——万一以后接口恢复，改一行就能放回来。
+        // ImageOnlyCheck 不再存在，所以这里只读不写。
 
         InitTagGroups(settings);
 
         RefreshTasteCountButtons();
+
+        ShowBackupState();
 
         LoadDanmakuUi();
         RefreshAccount();
@@ -60,16 +64,43 @@ public partial class SettingsWindow : Window
     // ================= 左侧导航 =================
 
     private void OnNavAccount(object sender, RoutedEventArgs e) => SwitchPage("account");
-    private void OnNavKeys(object sender, RoutedEventArgs e) => SwitchPage("keys");
+    private void OnNavContent(object sender, RoutedEventArgs e) => SwitchPage("content");
     private void OnNavTaste(object sender, RoutedEventArgs e) => SwitchPage("taste");
+    private void OnNavDanmaku(object sender, RoutedEventArgs e) => SwitchPage("danmaku");
+    private void OnNavKeys(object sender, RoutedEventArgs e) => SwitchPage("keys");
     private void OnNavBackup(object sender, RoutedEventArgs e) => SwitchPage("backup");
-    private void OnNavPlay(object sender, RoutedEventArgs e) => SwitchPage("play");
     private void OnNavAbout(object sender, RoutedEventArgs e) => SwitchPage("about");
 
     // ================= 备份 =================
 
     private DateTime _backupStartedAt = DateTime.MinValue;
     private string _lastBackupDir = "";
+
+    /// <summary>把"上次备份"的情况显示出来，并让两个打开按钮指向它。</summary>
+    private void ShowBackupState()
+    {
+        var st = DouyinDesktop.Core.BackupState.Load(DouyinDesktop.Core.DouyinPaths.DataDirectory);
+        if (st is null || st.Count == 0)
+        {
+            BackupLast.Text = "还没有备份过";
+            return;
+        }
+
+        bool dirExists = System.IO.Directory.Exists(st.Dir);
+
+        BackupLast.Text = dirExists
+            ? $"上次备份：{st.At} · {st.Count} 条 · {st.Bytes / 1024.0:0} KB"
+            : $"上次备份：{st.At} · {st.Count} 条（目录已被删除）";
+
+        if (!dirExists) return;
+
+        // 重启后也能直接打开上次那份，不用重新备份一遍
+        if (_lastBackupDir.Length == 0) _lastBackupDir = st.Dir;
+
+        BackupResult.Visibility = Visibility.Visible;
+        BackupSummary.Text = $"上次备份 {st.Count} 条 · {st.Bytes / 1024.0:0} KB";
+        BackupPath.Text = st.Dir;
+    }
 
     private async void OnRunBackup(object sender, RoutedEventArgs e)
     {
@@ -152,6 +183,17 @@ public partial class SettingsWindow : Window
             long bytes = new System.IO.DirectoryInfo(dir).GetFiles().Sum(f => f.Length);
             int imageCount = all.Count(x => x.IsImagePost);
 
+            // 记一笔，下次打开设置能直接看到"上次备份过没有"
+            new DouyinDesktop.Core.BackupState
+            {
+                At = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
+                Count = all.Count,
+                Dir = dir,
+                Bytes = bytes,
+            }.Save(DouyinDesktop.Core.DouyinPaths.DataDirectory);
+
+            ShowBackupState();
+
             BackupResult.Visibility = Visibility.Visible;
             BackupSummary.Text = $"已备份 {all.Count} 条" +
                                  (imageCount > 0 ? $"（其中图集 {imageCount} 条）" : "") +
@@ -175,7 +217,12 @@ public partial class SettingsWindow : Window
     private void OnOpenBackupDir(object sender, RoutedEventArgs e)
     {
         if (_lastBackupDir.Length == 0) return;
-        try { System.Diagnostics.Process.Start("explorer.exe", _lastBackupDir); }
+        try
+        {
+            // 路径带空格时必须自己加引号：explorer.exe 的参数是原始命令行，
+            // 不加引号会把 "D:\My Data\backup" 截成 "D:\My"。
+            System.Diagnostics.Process.Start("explorer.exe", $"\"{_lastBackupDir}\"");
+        }
         catch (Exception ex) { BackupStatus.Text = "打不开：" + ex.Message; }
     }
 
@@ -352,11 +399,16 @@ public partial class SettingsWindow : Window
         TasteMeta.Text = meta;
 
         // ---- 主题分布 ----
+        // 代表标签直接排在行下面，**不用 ToolTip**：
+        // 悬浮气泡在深色界面上容易出白底（继承前景色的问题），
+        // 而且"要点一下才能看到"本身就不如直接显示。
         TasteThemes.Children.Clear();
         for (int i = 0; i < r.Themes.Count; i++)
         {
             var t = r.Themes[i];
-            var row = new Grid { Margin = new Thickness(0, 0, 0, 7) };
+            var block = new StackPanel { Margin = new Thickness(0, 0, 0, 9) };
+
+            var row = new Grid();
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(92) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
@@ -403,11 +455,22 @@ public partial class SettingsWindow : Window
             Grid.SetColumn(pct, 2);
             row.Children.Add(pct);
 
-            // 代表标签放在名字下面会太挤，做成 ToolTip
-            if (t.Samples.Count > 0)
-                row.ToolTip = $"{t.Theme}：{t.Count} 条\n代表标签：{string.Join("、", t.Samples.Select(s => "#" + s))}";
+            block.Children.Add(row);
 
-            TasteThemes.Children.Add(row);
+            // 代表标签：跟在主题名下方，最多 3 个，超了截断
+            if (t.Samples.Count > 0)
+            {
+                block.Children.Add(new TextBlock
+                {
+                    Text = string.Join(" · ", t.Samples.Take(3)),
+                    FontSize = 10.5,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x5E, 0x5E, 0x6C)),
+                    Margin = new Thickness(92, 3, 0, 0),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                });
+            }
+
+            TasteThemes.Children.Add(block);
         }
 
         // ---- 高频标签 ----
@@ -640,12 +703,6 @@ public partial class SettingsWindow : Window
         GroupHint.Text = $"当前组：{_groups[_groupIndex].Name}　·　{summary}　·　切组键在「快捷键」里绑";
     }
 
-    private void OnImageOnlyChanged(object sender, RoutedEventArgs e)
-    {
-        _settings.ImageOnly = ImageOnlyCheck.IsChecked == true;
-        _settings.Save();
-    }
-
     private void OnDanmakuChanged(object sender, RoutedEventArgs e)
     {
         _settings.Danmaku = DanmakuCheck.IsChecked == true;
@@ -734,17 +791,19 @@ public partial class SettingsWindow : Window
     private void SwitchPage(string page)
     {
         NavAccount.Tag = page == "account" ? "active" : null;
-        NavKeys.Tag = page == "keys" ? "active" : null;
+        NavContent.Tag = page == "content" ? "active" : null;
         NavTaste.Tag = page == "taste" ? "active" : null;
+        NavDanmaku.Tag = page == "danmaku" ? "active" : null;
+        NavKeys.Tag = page == "keys" ? "active" : null;
         NavBackup.Tag = page == "backup" ? "active" : null;
-        NavPlay.Tag = page == "play" ? "active" : null;
         NavAbout.Tag = page == "about" ? "active" : null;
 
         PageAccount.Visibility = page == "account" ? Visibility.Visible : Visibility.Collapsed;
-        PageKeys.Visibility = page == "keys" ? Visibility.Visible : Visibility.Collapsed;
+        PageContent.Visibility = page == "content" ? Visibility.Visible : Visibility.Collapsed;
         PageTaste.Visibility = page == "taste" ? Visibility.Visible : Visibility.Collapsed;
+        PageDanmaku.Visibility = page == "danmaku" ? Visibility.Visible : Visibility.Collapsed;
+        PageKeys.Visibility = page == "keys" ? Visibility.Visible : Visibility.Collapsed;
         PageBackup.Visibility = page == "backup" ? Visibility.Visible : Visibility.Collapsed;
-        PagePlay.Visibility = page == "play" ? Visibility.Visible : Visibility.Collapsed;
         PageAbout.Visibility = page == "about" ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -752,8 +811,9 @@ public partial class SettingsWindow : Window
     {
         try
         {
+            // 同样要自己加引号，否则路径带空格（"D:\My Data\..."）会打不开
             System.Diagnostics.Process.Start("explorer.exe",
-                DouyinDesktop.Core.DouyinPaths.DataDirectory);
+                $"\"{DouyinDesktop.Core.DouyinPaths.DataDirectory}\"");
         }
         catch (Exception ex)
         {

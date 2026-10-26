@@ -73,6 +73,55 @@ public sealed class BackupFile
 }
 
 /// <summary>
+/// 上一次备份的记录，存在 <c>data/backup/last.json</c>。
+///
+/// 为什么单独存：备份目录里全是带时间戳的子目录，重启后想知道"到底备过没有、
+/// 什么时候备的"，只能翻目录猜。存一份状态最省事。
+/// </summary>
+public sealed class BackupState
+{
+    public string At { get; init; } = "";
+    public int Count { get; init; }
+    public string Dir { get; init; } = "";
+    public long Bytes { get; init; }
+
+    public static string PathIn(string dataDir)
+        => System.IO.Path.Combine(dataDir, "backup", "last.json");
+
+    public static BackupState? Load(string dataDir)
+    {
+        try
+        {
+            string path = PathIn(dataDir);
+            if (!System.IO.File.Exists(path)) return null;
+            return JsonSerializer.Deserialize<BackupState>(System.IO.File.ReadAllText(path));
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or JsonException)
+        {
+            return null;        // 记录坏了就当没备份过，不影响使用
+        }
+    }
+
+    public void Save(string dataDir)
+    {
+        try
+        {
+            string path = PathIn(dataDir);
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+            System.IO.File.WriteAllText(path, JsonSerializer.Serialize(this, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            }));
+        }
+        catch (System.IO.IOException)
+        {
+            // 存不下不影响本次使用
+        }
+    }
+}
+
+/// <summary>
 /// 把一批作品导出成 JSON / CSV / HTML。
 ///
 /// 三种格式各有用途，**内容完全一致**，只是给不同场景看：

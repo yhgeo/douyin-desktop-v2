@@ -13,6 +13,16 @@ public partial class App : Application
         {
             if (args.ExceptionObject is Exception ex) ShowFatal(ex);
         };
+
+        // 后台 Task 的异常默认是**静默吞掉**的（.NET 4.5+ 不崩进程），
+        // 预取、弹幕这些跑在 Task.Run 里的逻辑出问题会完全没有痕迹。
+        // 记一笔日志，至少排查时有据可查。
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            AppLog.Write("后台任务异常：" + args.Exception);
+            args.SetObserved();
+        };
+
         base.OnStartup(e);
 
         // --capture-headers：只在屏幕外跑一次"抓 secsdk 头"，抓完退出。

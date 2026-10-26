@@ -53,7 +53,7 @@ public partial class MainWindow : Window
     private List<Aweme> _items => _feed.Items;
     private int _index { get => _feed.Index; set => _feed.Index = value; }
     private HashSet<string> _presented => _feed.Presented;
-    private bool _useScrollFeed;
+    private int _refreshIndex = 2;
 
     /// <summary>
     /// 当前在哪个流。**互斥，用一个枚举管住**——以前是 _followMode / _authorMode
@@ -95,8 +95,6 @@ public partial class MainWindow : Window
             else if (_kind == FeedKind.Collect) _kind = FeedKind.Recommend;
         }
     }
-
-    private int _refreshIndex = 2;
 
     // 图集：图片走单独的 HttpClient，缓存最近看过的几十张
     private readonly HttpClient _imageHttp = CreateImageHttp();
@@ -776,15 +774,12 @@ public partial class MainWindow : Window
                     .Where(x => seenAuthors.Add(x.Author?.SecUid ?? x.Id))
                     .ToList();
             }
-            else if (_settings.ImageOnly)
-            {
-                got = await FetchImagesOnlyAsync();
-                if (got.Count == 0)
-                {
-                    SetStatus("推荐流里没找到图集（实测连续 80 条都是视频）。看图集请按 Tab 切到「主页」");
-                    return;
-                }
-            }
+            // 「只看图集」的开关已经从设置里删掉了（推荐流实测 80 条 0 图集，
+            // 开着只会连发 6 次请求然后报"没找到"）。
+            //
+            // ⚠️ 但**不能只是删 UI**：老配置里 ImageOnly 可能还是 true，
+            // 那样界面上再也关不掉，用户会一直卡在"推荐流里没找到图集"。
+            // 所以这里直接忽略这个字段，等于永久关闭。
             else
             {
                 // 标签过滤会让一批剩不下几条，所以**循环拉到够 10 条**（最多 6 轮）。
@@ -1014,52 +1009,6 @@ public partial class MainWindow : Window
         if (kept.Count < items.Count)
             AppLog.Write($"[标签] 过滤掉 {items.Count - kept.Count} 条（剩 {kept.Count}）");
         return kept;
-    }
-
-    /// <summary>
-    /// 只看图集：循环拉推荐流，把视频丢掉，只留图集。
-    ///
-    /// ⚠️ 2026-10-25 实测：两个推荐接口合计 80 条里图集为 0，
-    /// 所以这条路目前基本拉不到东西。保留是因为接口随时可能变回来。
-    /// 图集的可靠入口是作者主页（aweme/post）。
-    /// 仍然硬性限制最多 6 次，拉不到就返回空，不会无限请求。
-    /// </summary>
-    private async Task<IReadOnlyList<Aweme>> FetchImagesOnlyAsync()
-    {
-        // 实测游客态几乎刷不到图集（IP 属地也不返回），登录后才正常
-        if (_client.Session?.IsLoggedIn != true)
-        {
-            SetStatus("只看图集需要先登录：游客态下抖音基本不推图文");
-            return Array.Empty<Aweme>();
-        }
-
-        var images = new List<Aweme>();
-        var seen = new HashSet<string>();
-
-        for (int i = 0; i < 6 && images.Count < 8; i++)
-        {
-            SetStatus($"只看图集：第 {i + 1} 次筛选，已找到 {images.Count} 条…");
-
-            var r = _useScrollFeed
-                ? await _client.GetFeedScrollAsync(_settings.FeedBatchSize, _refreshIndex++)
-                : await _client.GetFeedAsync(_settings.FeedBatchSize, _presented);
-            _useScrollFeed = !_useScrollFeed;
-
-            if (!r.Success) break;
-
-            foreach (var a in r.Items)
-            {
-                if (!a.IsImagePost) continue;
-                if (_presented.Contains(a.Id) || !seen.Add(a.Id)) continue;
-                images.Add(a);
-            }
-
-            if (images.Count >= 8) break;
-            await Task.Delay(350);
-        }
-
-        PushStatus($"只看图集：找到 {images.Count} 条");
-        return images;
     }
 
     private void UpdateMetaLine(Aweme item, string ip)
@@ -2078,6 +2027,10 @@ public partial class MainWindow : Window
         var cts = new CancellationTokenSource();
         _prefetchCts = cts;
 
+        // 进后台线程前先快照：_items 是普通 List，UI 线程随时可能 Add
+        // （补货、加载下一页），后台边读边写会抛 InvalidOperationException。
+        var snapshot = _items.ToList();
+
         _ = Task.Run(async () =>
         {
             // 顺序即优先级：用户主要往下刷，所以 +1 > +2 > -1。
@@ -2087,9 +2040,9 @@ public partial class MainWindow : Window
                 if (cts.IsCancellationRequested) return;
 
                 int i = index + offset;
-                if (i < 0 || i >= _items.Count) continue;
+                if (i < 0 || i >= snapshot.Count) continue;
 
-                var next = _items[i];
+                var next = snapshot[i];
                 if (!next.IsPlayable) continue;
 
                 try { await _proxy.PrefetchAsync(next, cts.Token); }
