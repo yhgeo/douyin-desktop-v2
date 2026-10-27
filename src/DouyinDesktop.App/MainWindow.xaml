@@ -23,8 +23,13 @@
         这里把"边框"这件事交给 WindowChrome，全屏只是隐藏标题栏 + 最大化，句柄不动。
     -->
     <WindowChrome.WindowChrome>
+        <!-- ResizeBorderThickness 必须是 0。
+             设成 6 时，窗口四边（尤其底部）有 6px 的系统缩放热区，
+             鼠标移过去变成缩放光标，**点击被系统拦下，根本到不了 WPF**——
+             底部进度条正好在那 6px 里，于是"拖不动"。
+             代价是不能再拖边缩放；调大小用最大化按钮、双击标题栏或 Win+方向键。 -->
         <WindowChrome CaptionHeight="38"
-                      ResizeBorderThickness="6"
+                      ResizeBorderThickness="0"
                       GlassFrameThickness="0"
                       CornerRadius="0"
                       UseAeroCaptionButtons="False" />
@@ -65,6 +70,11 @@
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                         WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button Content="搜索" Width="52" Height="38"
+                        Style="{StaticResource CaptionButton}"
+                        FontFamily="Microsoft YaHei UI" FontSize="12"
+                        ToolTip="搜索视频（/）"
+                        Click="OnSearchClick" />
                 <Button Content="设置" Width="56" Height="38"
                         Style="{StaticResource CaptionButton}"
                         FontFamily="Microsoft YaHei UI" FontSize="12"
@@ -515,5 +525,26 @@
                 </Grid>
             </Border>
         </Grid>
+
+        <!-- 搜索浮层：按 / 或点标题栏「搜索」打开 -->
+        <Grid x:Name="SearchLayer" Grid.RowSpan="2" Visibility="Collapsed"
+              Background="#B3000000" Panel.ZIndex="100">
+            <Border Background="#17171E" CornerRadius="10" Padding="22,20"
+                    Width="480" VerticalAlignment="Top" Margin="0,140,0,0"
+                    BorderBrush="#2A2A34" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="搜索视频" FontSize="13" Foreground="#8C8C99" />
+                    <TextBox x:Name="SearchBox" Margin="0,10,0,0" Height="38"
+                             Background="#101016" Foreground="#E8E8F0"
+                             BorderBrush="#2A2A34" BorderThickness="1"
+                             CaretBrush="#E8E8F0" FontSize="15" Padding="10,0"
+                             VerticalContentAlignment="Center"
+                             KeyDown="OnSearchKeyDown" />
+                    <TextBlock Text="回车搜索　·　Esc 取消" FontSize="11"
+                               Foreground="#5A5A66" Margin="0,10,0,0" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
     </Grid>
 </Window>

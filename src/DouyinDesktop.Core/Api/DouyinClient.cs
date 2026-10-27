@@ -1940,6 +1940,72 @@ public sealed class DouyinClient : IDisposable
         return ((int)resp.StatusCode, body);
     }
 
+    /// <summary>
+    /// 搜索视频，返回解析好的一页。
+    ///
+    /// **2026-10-27 打通**：之前一直返回 2483，根因是用错了签名——
+    /// 浏览器现在只发 `a_bogus`，`X-Bogus` 早就废弃了。
+    /// 照真实请求用 a_bogus + 完整参数后实测 `status_code=0`、一页 16 条。
+    ///
+    /// 响应结构和推荐流完全不同：数据在 `data[].aweme_info`，
+    /// 而 `aweme_list` 是 **null**。`data` 里还混着用户卡片、直播、话题，
+    /// 只取带 `aweme_info` 的节点。
+    /// </summary>
+    public async Task<SearchPage> SearchAsync(
+        string keyword, int offset = 0, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(keyword)) return SearchPage.Fail("关键词为空");
+
+        var (status, body) = await SearchRawAsync2(keyword, offset, ct);
+
+        if (status != 200) return SearchPage.Fail($"HTTP {status}");
+        if (body.Length == 0) return SearchPage.Fail("空响应");
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+
+            int code = root.TryGetProperty("status_code", out var sc) && sc.ValueKind == JsonValueKind.Number
+                ? sc.GetInt32() : -1;
+            if (code != 0) return SearchPage.Fail($"status_code={code}");
+
+            var list = new List<Aweme>();
+            if (root.TryGetProperty("data", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var node in arr.EnumerateArray())
+                {
+                    if (node.ValueKind != JsonValueKind.Object) continue;
+                    if (!node.TryGetProperty("aweme_info", out var ai)) continue;
+                    if (ai.ValueKind != JsonValueKind.Object) continue;
+
+                    // 单条坏数据不能带走整页（is_commerce / null 字段都踩过）
+                    try
+                    {
+                        var a = ai.Deserialize<Aweme>();
+                        if (a is not null && !string.IsNullOrEmpty(a.Id)) list.Add(a);
+                    }
+                    catch (JsonException) { }
+                }
+            }
+
+            bool hasMore = root.TryGetProperty("has_more", out var hm) &&
+                           hm.ValueKind == JsonValueKind.Number && hm.GetInt32() == 1;
+
+            int next = root.TryGetProperty("cursor", out var cu) && cu.ValueKind == JsonValueKind.Number
+                ? (int)cu.GetInt64()
+                : offset + 16;
+
+            Log?.Invoke($"搜索「{keyword}」offset={offset} → {list.Count} 条 / {body.Length} 字节");
+            return new SearchPage(list, code, hasMore, next, "");
+        }
+        catch (JsonException ex)
+        {
+            Log?.Invoke("搜索响应解析失败：" + ex.Message);
+            return SearchPage.Fail("响应不是合法 JSON");
+        }
+    }
+
     // ================= 请求头 =================
 
     /// <summary>
@@ -1985,4 +2051,14 @@ public sealed class DouyinClient : IDisposable
         _http.Dispose();
         _sessionGate.Dispose();
     }
+}
+
+/// <summary>搜索结果的一页。结构和推荐流的 <see cref="PagedResult"/> 不同，单独一个类型。</summary>
+public sealed record SearchPage(
+    IReadOnlyList<Aweme> Items, int Status, bool HasMore, int NextOffset, string Message)
+{
+    public static SearchPage Fail(string msg)
+        => new(Array.Empty<Aweme>(), -1, false, 0, msg);
+
+    public bool Success => Message.Length == 0;
 }

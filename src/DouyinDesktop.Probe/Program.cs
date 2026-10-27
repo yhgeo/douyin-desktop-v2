@@ -516,6 +516,14 @@ if (args.Length > 0 && args[0] == "search2")
             Console.WriteLine($"  → {n} 条作品");
         }
     }
+
+    // 走正式入口（解析成 Aweme），确认 data[].aweme_info 这条链路通
+    var parsed = await c.SearchAsync(kw);
+    Console.WriteLine($"\n=== SearchAsync === success={parsed.Success}  " +
+                      $"{parsed.Items.Count} 条  hasMore={parsed.HasMore}  next={parsed.NextOffset}  {parsed.Message}");
+    foreach (var it in parsed.Items.Take(3))
+        Console.WriteLine($"    @{it.AuthorName}  {Short(it.Desc, 28)}  " +
+                          $"时长 {(it.Video?.Duration ?? 0) / 1000}s");
     return 0;
 }
 

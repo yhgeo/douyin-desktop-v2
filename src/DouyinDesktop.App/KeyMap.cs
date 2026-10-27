@@ -24,6 +24,7 @@ public sealed class KeyMap
         new("mute",       "静音",         Key.M,      Array.Empty<Key>(), true),
         new("fullscreen", "全屏",         Key.F,      Array.Empty<Key>(), true),
         new("tab",        "详情 / 评论 / 主页", Key.Tab, Array.Empty<Key>()),
+        new("search",     "搜索视频",     Key.OemQuestion, Array.Empty<Key>()),
         new("like",       "点赞 / 取消",  Key.X,      Array.Empty<Key>()),
         new("openweb",    "在浏览器中打开", Key.B,    Array.Empty<Key>()),
         new("follow",     "关注页 / 推荐页", Key.G,   Array.Empty<Key>()),

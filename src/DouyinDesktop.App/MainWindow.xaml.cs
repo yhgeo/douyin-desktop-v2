@@ -40,6 +40,16 @@ public partial class MainWindow : Window
 
         /// <summary>还有没有下一页。</summary>
         public bool HasMore { get; set; } = true;
+
+        /// <summary>清空（换搜索关键词时用）。</summary>
+        public void Reset()
+        {
+            Items.Clear();
+            Presented.Clear();
+            Index = -1;
+            Cursor = "0";
+            HasMore = true;
+        }
     }
 
     private readonly FeedContext _recommendFeed = new();
@@ -60,7 +70,7 @@ public partial class MainWindow : Window
     /// 两个 bool，加"喜欢/收藏"就会变成四个 bool 互相打架（漏设一个就串流）。
     /// 下面几个属性是对外接口，现有赋值代码不用改。
     /// </summary>
-    private enum FeedKind { Recommend, Follow, Author, Likes, Collect }
+    private enum FeedKind { Recommend, Follow, Author, Likes, Collect, Search }
     private FeedKind _kind = FeedKind.Recommend;
 
     /// <summary>当前是不是「关注」页（只刷关注的人）。</summary>
@@ -95,6 +105,22 @@ public partial class MainWindow : Window
             else if (_kind == FeedKind.Collect) _kind = FeedKind.Recommend;
         }
     }
+
+    /// <summary>当前是不是「搜索结果」页。</summary>
+    private bool _searchMode
+    {
+        get => _kind == FeedKind.Search;
+        set
+        {
+            if (value) _kind = FeedKind.Search;
+            else if (_kind == FeedKind.Search) _kind = FeedKind.Recommend;
+        }
+    }
+
+    private readonly FeedContext _searchFeed = new();
+    private string _searchKeyword = "";
+    /// <summary>下一页的 offset。-1 表示没有更多了。</summary>
+    private int _searchOffset;
 
     // 图集：图片走单独的 HttpClient，缓存最近看过的几十张
     private readonly HttpClient _imageHttp = CreateImageHttp();
@@ -474,9 +500,13 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-        ImmAssociateContext(hwnd, IntPtr.Zero);
+        _hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        // 返回值是原来的输入法上下文，搜索框要临时还回去（否则打不了中文）
+        _imeContext = ImmAssociateContext(_hwnd, IntPtr.Zero);
     }
+
+    private IntPtr _hwnd;
+    private IntPtr _imeContext;
 
     /// <summary>
     /// 点画面暂停 / 继续。
@@ -788,7 +818,25 @@ public partial class MainWindow : Window
             IReadOnlyList<Aweme> got;
             long elapsed = 0;
 
-            if (_likesMode || _collectMode)
+            if (_searchMode)
+            {
+                if (_searchOffset < 0)
+                {
+                    SetStatus("没有更多搜索结果了");
+                    return;
+                }
+
+                var page = await _client.SearchAsync(_searchKeyword, _searchOffset);
+                if (!page.Success)
+                {
+                    SetStatus($"搜索「{_searchKeyword}」失败：{page.Message}");
+                    return;
+                }
+
+                got = page.Items;
+                _searchOffset = page.HasMore ? page.NextOffset : -1;
+            }
+            else if (_likesMode || _collectMode)
             {
                 // 喜欢/收藏都是"我自己"的数据，游客态拿不到
                 if (_client.Session?.IsLoggedIn != true)
@@ -1161,6 +1209,25 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 执行搜索：切到搜索流并加载第一页。
+    ///
+    /// 搜索结果和推荐流是两套数据，所以用独立的 FeedContext——
+    /// 搜完之后按 Esc / 点「推荐」能回到原来的推荐流，位置还在。
+    /// </summary>
+    private async Task StartSearchAsync(string keyword)
+    {
+        keyword = keyword.Trim();
+        if (keyword.Length == 0) return;
+
+        _searchKeyword = keyword;
+        _searchOffset = 0;
+        _searchFeed.Reset();
+
+        _searchMode = true;
+        await SwitchFeedAsync(_searchFeed, $"搜索「{keyword}」");
+    }
+
+    /// <summary>
     /// 退出作者流：回推荐流 + 右侧切回「详情」页。
     /// U 和 Esc 共用——U 是开关，Esc 是"退一层"的直觉操作。
     /// 推荐流走缓存，不重新请求，位置还是离开时那一条。
@@ -1190,6 +1257,55 @@ public partial class MainWindow : Window
     {
         if (_kind == FeedKind.Recommend) return;
         await LeaveAuthorAsync();
+    }
+
+    // ================= 搜索 =================
+
+    private void OnSearchClick(object sender, RoutedEventArgs e) => OpenSearch();
+
+    private void OpenSearch()
+    {
+        // 主窗口平时是断掉输入法的（不然 F / M 这些单键会被 IME 抢走）。
+        // 搜索框要打中文，所以**临时把原来的输入法上下文还回去**，
+        // 关掉浮层再断开。
+        if (_hwnd != IntPtr.Zero && _imeContext != IntPtr.Zero)
+            ImmAssociateContext(_hwnd, _imeContext);
+
+        SearchLayer.Visibility = Visibility.Visible;
+        SearchBox.Text = _searchKeyword;
+        SearchBox.Focus();
+        SearchBox.SelectAll();
+    }
+
+    private void CloseSearch()
+    {
+        SearchLayer.Visibility = Visibility.Collapsed;
+
+        if (_hwnd != IntPtr.Zero)
+            ImmAssociateContext(_hwnd, IntPtr.Zero);
+
+        // 焦点还给窗口，否则快捷键全都收不到
+        Focus();
+    }
+
+    private async void OnSearchKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            CloseSearch();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            string keyword = SearchBox.Text.Trim();
+            e.Handled = true;
+            if (keyword.Length == 0) return;
+
+            CloseSearch();
+            await StartSearchAsync(keyword);
+        }
     }
 
     /// <summary>
@@ -1944,13 +2060,14 @@ public partial class MainWindow : Window
         string text = _authorMode ? "作者主页"
             : _likesMode ? "喜欢"
             : _collectMode ? "收藏"
+            : _searchMode ? $"搜索：{_searchKeyword}"
             : _followMode ? "关注"
             : "推荐";
         ModeLabel.Text = text;
 
         // 非推荐流换个底色，一眼能看出来
         ModeBadge.Background = new System.Windows.Media.SolidColorBrush(
-            _authorMode || _followMode || _likesMode || _collectMode
+            _authorMode || _followMode || _likesMode || _collectMode || _searchMode
                 ? System.Windows.Media.Color.FromRgb(0x3A, 0x1D, 0x26)
                 : System.Windows.Media.Color.FromRgb(0x1F, 0x1F, 0x28));
 
@@ -2740,6 +2857,9 @@ public partial class MainWindow : Window
     {
         try
         {
+            // 搜索浮层开着时，按键全部交给输入框（回车/Esc 由 OnSearchKeyDown 处理），
+            // 否则输入 "f" 会触发全屏、输入 "s" 会跳下一条。
+            if (SearchLayer.Visibility == Visibility.Visible) return;
             // Esc 是「退一层」，按这个顺序：
             //   全屏   -> 退全屏
             //   作者流 -> 回推荐（同时切回详情页）
@@ -2753,7 +2873,7 @@ public partial class MainWindow : Window
                     return;
                 }
 
-                if (_authorMode)
+                if (_authorMode || _searchMode)
                 {
                     // 必须在 await 之前置 Handled：await 一让出，事件就已经返回了
                     e.Handled = true;
@@ -2867,6 +2987,10 @@ public partial class MainWindow : Window
                     await SwitchFeedAsync(
                         _followMode ? _followFeed : _recommendFeed,
                         _followMode ? "关注" : "推荐");
+                    break;
+
+                case "search":
+                    OpenSearch();
                     break;
 
                 case "tab":
