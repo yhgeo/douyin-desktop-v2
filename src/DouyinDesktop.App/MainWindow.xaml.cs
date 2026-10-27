@@ -826,9 +826,10 @@ public partial class MainWindow : Window
                     return;
                 }
 
-                // 搜索接口对频率很敏感：连着发会返回 verify_check（风控），
-                // 表现是"翻页翻不出东西"。翻第二页起先歇一下。
-                if (_searchOffset > 0) await Task.Delay(1200);
+                // 搜索接口对翻页频率极其敏感：第一页正常，第二页常常直接
+                // 返回 verify_check（风控）。浏览器能翻是因为有真实滚动/点击行为。
+                // 这里只能尽量放慢，拿不到就如实提示，不假装"没有更多"。
+                if (_searchOffset > 0) await Task.Delay(4000);
 
                 var page = await _client.SearchAsync(_searchKeyword, _searchOffset);
                 if (!page.Success)
