@@ -101,7 +101,8 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" />
                     <!-- 进度条必须放在 mpv 区域**外面**，HwndHost 会盖住同区域的 WPF 内容 -->
-                    <RowDefinition Height="3" />
+                    <!-- 5px 是为了好点中：3px 时鼠标经常擦边而过 -->
+                    <RowDefinition Height="5" />
                 </Grid.RowDefinitions>
 
             <Grid x:Name="VideoHost" Grid.Row="0" Background="Black" SizeChanged="OnVideoHostSizeChanged"
@@ -128,19 +129,23 @@
                 </Grid>
             </Grid>
 
-                <!-- 播放进度条：放在 mpv 画布下方独立的 3px 行里 -->
+                <!-- 播放进度条：放在 mpv 画布下方独立的 5px 行里。
+                     点一下跳到该位置，按住拖动可以连续 seek。 -->
                 <Border x:Name="ProgressTrack" Grid.Row="1" Background="#26FFFFFF"
-                        IsHitTestVisible="False">
+                        Cursor="Hand"
+                        MouseLeftButtonDown="OnProgressMouseDown"
+                        MouseMove="OnProgressMouseMove"
+                        MouseLeftButtonUp="OnProgressMouseUp">
                     <Rectangle x:Name="ProgressFill" HorizontalAlignment="Left"
                                Fill="#FE2C55" Width="0" />
                 </Border>
             </Grid>
 
             <!-- 信息栏 -->
-            <Border x:Name="SidePanel" Grid.Column="1" Width="344"
+            <Border x:Name="SidePanel" Grid.Column="1" Width="300"
                     Background="{StaticResource PanelBrush}"
                     BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
-                <Grid Margin="28,26,28,22">
+                <Grid Margin="22,22,22,18">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -227,6 +232,11 @@
 
                                 <TextBlock Grid.Row="1" Grid.Column="0" Text="码率" Style="{StaticResource Caption}" />
                                 <TextBlock x:Name="TechBitrate" Grid.Row="1" Grid.Column="1" Text="—"
+                                           Style="{StaticResource Caption}" Foreground="#C8C8D2" />
+
+                                <!-- 弹幕数：接口只给分页没有总数，所以是"已加载到"的数量 -->
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="弹幕" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="DanmakuCountText" Grid.Row="1" Grid.Column="3" Text="—"
                                            Style="{StaticResource Caption}" Foreground="#C8C8D2" />
                             </Grid>
 

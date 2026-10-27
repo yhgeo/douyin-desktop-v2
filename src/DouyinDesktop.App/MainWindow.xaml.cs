@@ -137,6 +137,20 @@ public partial class MainWindow : Window
     /// <summary>哪条作品的 file-loaded 已经到了。弹幕要等它，别跟视频抢带宽。</summary>
     private string _fileLoadedFor = "";
 
+    // ================= 观看进度记忆 =================
+    //
+    // 切走再切回来，接着上次的位置播。**不是永久记住**：
+    //   · 只记 5%–90% 之间的进度（开头没意义；结尾超出预取范围，恢复要重新拉）
+    //   · 最多 50 条，超了丢最旧的
+    //   · 10 分钟内有效，过期就从头播
+    //   · 用过一次就删，避免"每次切回来都跳"
+    private readonly Dictionary<string, (double Pos, DateTime At)> _positions = new();
+    private const int MaxRememberedPositions = 50;
+    private static readonly TimeSpan PositionTtl = TimeSpan.FromMinutes(10);
+
+    /// <summary>file-loaded 之后要跳到的位置（秒）。0 表示不跳。</summary>
+    private double _pendingSeek;
+
     /// <summary>当前这条的平台标签（video_tag）。只有详情接口给，异步补。</summary>
     private IReadOnlyList<string> _officialTags = Array.Empty<string>();
 
@@ -333,6 +347,9 @@ public partial class MainWindow : Window
         // 顺手同步登录过期徽章：不依赖事件，避免"状态改了但界面没反应"
         UpdateExpiredBadge();
 
+        // 拖动期间由鼠标位置决定，别让定时器把条拽回去
+        if (_progressDragging) return;
+
         double pos = _mpv?.Position ?? 0;
         double total = _mpv?.Duration ?? 0;
 
@@ -345,6 +362,105 @@ public partial class MainWindow : Window
         double ratio = Math.Clamp(pos / total, 0, 1);
         double track = ProgressTrack.ActualWidth;
         ProgressFill.Width = track <= 0 ? 0 : track * ratio;
+    }
+
+    // ================= 进度条拖动 =================
+
+    private bool _progressDragging;
+    private DateTime _lastSeekAt = DateTime.MinValue;
+
+    private void OnProgressMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if ((_mpv?.Duration ?? 0) <= 0) return;      // 图集 / 还没加载出来
+
+        _progressDragging = true;
+        ProgressTrack.CaptureMouse();
+        SeekToPointer(e, force: true);
+        e.Handled = true;
+    }
+
+    private void OnProgressMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_progressDragging) return;
+        SeekToPointer(e, force: false);
+    }
+
+    private void OnProgressMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_progressDragging) return;
+
+        _progressDragging = false;
+        ProgressTrack.ReleaseMouseCapture();
+
+        // 松手时补一次精确 seek：拖动过程中的调用可能被节流掉
+        SeekToPointer(e, force: true);
+        e.Handled = true;
+    }
+
+    /// <summary>把进度条拖到鼠标位置并 seek。</summary>
+    private void SeekToPointer(MouseEventArgs e, bool force)
+    {
+        double total = _mpv?.Duration ?? 0;
+        double width = ProgressTrack.ActualWidth;
+        if (total <= 0 || width <= 0) return;
+
+        double ratio = Math.Clamp(e.GetPosition(ProgressTrack).X / width, 0, 1);
+
+        // 先把条画到鼠标位置——seek 是异步的，不画会"拖了没反应"
+        ProgressFill.Width = width * ratio;
+
+        // 节流：鼠标移动事件每秒几十个，全发给 mpv 只会让它排队
+        if (!force && (DateTime.Now - _lastSeekAt).TotalMilliseconds < 80) return;
+        _lastSeekAt = DateTime.Now;
+
+        double target = Math.Clamp(ratio * total, 0, Math.Max(0, total - 0.2));
+        _ = _mpv!.SeekAsync(target);
+    }
+
+    // ================= 观看进度记忆 =================
+
+    /// <summary>把当前这条的进度记下来（切走前调用）。</summary>
+    private void RememberPosition()
+    {
+        if (_imageMode) return;
+        if (_index < 0 || _index >= _items.Count) return;
+
+        var cur = _items[_index];
+        double pos = _mpv?.Position ?? 0;
+        double dur = _mpv?.Duration ?? 0;
+
+        // 时长拿不到、或者还没真正开始播，就没必要记
+        if (dur <= 1 || pos <= 1) return;
+
+        double ratio = pos / dur;
+
+        // 开头 5% 内不记（等于从头看）；90% 之后也不记——
+        // 那个位置已经超出"开头 1MB"的预取范围，恢复时还得重新拉，不如直接从头。
+        if (ratio < 0.05 || ratio > 0.90)
+        {
+            _positions.Remove(cur.Id);
+            return;
+        }
+
+        _positions[cur.Id] = (pos, DateTime.Now);
+
+        if (_positions.Count > MaxRememberedPositions)
+        {
+            // 丢最旧的一条，避免长时间刷视频把内存撑起来
+            string oldest = _positions.OrderBy(x => x.Value.At).First().Key;
+            _positions.Remove(oldest);
+        }
+    }
+
+    /// <summary>取出这条上次的进度（取出即删除，只恢复一次）。</summary>
+    private double TakePosition(string id)
+    {
+        if (!_positions.TryGetValue(id, out var v)) return 0;
+
+        _positions.Remove(id);
+        if (DateTime.Now - v.At > PositionTtl) return 0;
+
+        return v.Pos;
     }
 
     /// <summary>
@@ -1152,6 +1268,11 @@ public partial class MainWindow : Window
         _danmakuAwemeId = item.Id;
         _danmakuAssPath = null;
 
+        // 详情页的弹幕数：接口只给分页、没有总数，所以显示"已加载到多少条"。
+        // 没开弹幕功能时这里是"—"，避免让人以为这条视频真的一条弹幕都没有。
+        if (DanmakuCountText is not null)
+            DanmakuCountText.Text = _settings.Danmaku ? "0" : "—";
+
         int old = _danmakuSubId;
         _danmakuSubId = -1;
         if (old >= 0) _ = RemoveSubtitleQuietlyAsync(old);
@@ -1229,6 +1350,10 @@ public partial class MainWindow : Window
     private async Task ApplyDanmakuAsync(Aweme item, CancellationToken ct)
     {
         if (_mpv is null) return;
+
+        // 详情页的弹幕数跟着走：每拉一段就更新，用户能看到"越攒越多"
+        if (DanmakuCountText is not null)
+            DanmakuCountText.Text = _danmakuItems.Count.ToString();
 
         var style = _settings.ToDanmakuStyle();
 
@@ -1368,8 +1493,16 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 切走之前先把上一条的进度记下来（同一个 index 重播时不记，
+        // 那种情况是"刷新地址重试"，进度本来就该保持）
+        if (_index != index) RememberPosition();
+
         ExitImageMode();
         _index = index;
+
+        // 这条以前看到一半就接着播。file-loaded 之后才真正 seek（见 OnFileLoaded）。
+        _pendingSeek = TakePosition(item.Id);
+
         ShowInfo(item);
 
         if (_mpv is null)
@@ -2106,6 +2239,16 @@ public partial class MainWindow : Window
         _consecutiveFailures = 0;
         _restoredSession = false;      // 恢复的那条播起来了，之后就不算"恢复中"了
         _fileLoadedFor = CurrentId;    // 弹幕从这一刻起才允许拉
+
+        // 上次看到一半的那条，接着播。
+        // 必须等 file-loaded：LoadAsync 返回时 mpv 还没建好解复用器，seek 会被丢掉。
+        if (_pendingSeek > 0)
+        {
+            double target = _pendingSeek;
+            _pendingSeek = 0;
+            _ = _mpv?.SeekAsync(target);
+        }
+
         string source = _lastFromCache ? "已预取" : "网络";
         Dispatcher.BeginInvoke(() =>
             SetStatus(ms > 0 ? $"已加载（{source}），耗时 {ms}ms" : "已加载"));

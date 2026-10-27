@@ -2213,6 +2213,53 @@ if (args.Length > 0 && args[0] == "backup")
     return 0;
 }
 
+// 弹幕接口的响应有哪些字段（想显示"弹幕总数"）：dotnet run --project src/DouyinDesktop.Probe -- dmfields
+if (args.Length > 0 && args[0] == "dmfields")
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using var cd = DouyinClient.Create();
+    cd.Log += m => Console.WriteLine("    " + m);
+
+    var dmFeed = await cd.GetFeedAsync(12);
+    if (!dmFeed.Success) { Console.WriteLine("拉推荐失败：" + dmFeed.Message); return 1; }
+
+    foreach (var item in dmFeed.Items)
+    {
+        var page = await cd.GetDanmakuAsync(item.Id, 0, 32000);
+        if (!page.HasItems) continue;
+
+        Console.WriteLine($"找到有弹幕的作品 {item.Id}（本窗口 {page.Items.Count} 条）\n");
+
+        var (st, body) = await cd.GetRawAsync("/aweme/v1/web/danmaku/list/", new[]
+        {
+            new KeyValuePair<string, string>("aweme_id", item.Id),
+            new KeyValuePair<string, string>("item_id", item.Id),
+            new KeyValuePair<string, string>("start_time", "0"),
+            new KeyValuePair<string, string>("end_time", "32000"),
+        }, useWebSign: true);
+
+        Console.WriteLine($"HTTP {st}  {body.Length} 字节");
+        using var doc = JsonDocument.Parse(body);
+        Console.WriteLine("顶层字段：");
+        foreach (var p in doc.RootElement.EnumerateObject())
+        {
+            string extra = p.Value.ValueKind switch
+            {
+                JsonValueKind.Array => $" [{p.Value.GetArrayLength()} 项]",
+                JsonValueKind.Object => " (对象)",
+                JsonValueKind.String => $" = {Short(p.Value.GetString() ?? "", 30)}",
+                JsonValueKind.Number => $" = {p.Value}",
+                _ => "",
+            };
+            Console.WriteLine($"  {p.Name,-20} {p.Value.ValueKind}{extra}");
+        }
+        return 0;
+    }
+
+    Console.WriteLine("12 条推荐里都没弹幕，换个时间再试");
+    return 1;
+}
+
 // 登录态 vs 游客态的关注流：内容一样就说明服务端根本没认登录
 // dotnet run --project src/DouyinDesktop.Probe -- followguest
 if (args.Length > 0 && args[0] == "followguest")
