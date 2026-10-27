@@ -111,8 +111,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" />
                     <!-- 进度条必须放在 mpv 区域**外面**，HwndHost 会盖住同区域的 WPF 内容 -->
-                    <!-- 5px 是为了好点中：3px 时鼠标经常擦边而过 -->
-                    <RowDefinition Height="5" />
+                    <RowDefinition Height="3" />
                 </Grid.RowDefinitions>
 
             <Grid x:Name="VideoHost" Grid.Row="0" Background="Black" SizeChanged="OnVideoHostSizeChanged"
@@ -526,15 +525,21 @@
             </Border>
         </Grid>
 
-        <!-- 搜索浮层：按 / 或点标题栏「搜索」打开 -->
-        <Grid x:Name="SearchLayer" Grid.RowSpan="2" Visibility="Collapsed"
-              Background="#B3000000" Panel.ZIndex="100">
-            <Border Background="#17171E" CornerRadius="10" Padding="22,20"
-                    Width="480" VerticalAlignment="Top" Margin="0,140,0,0"
-                    BorderBrush="#2A2A34" BorderThickness="1">
+        <!-- 搜索框：必须是 Popup。
+             mpv 是 HwndHost（独立 Win32 子窗口），**永远盖在 WPF 内容之上**——
+             放在 Grid 里做浮层的话，视频区那块会被它整个挡住，
+             表现就是"界面变暗了但看不到搜索框"。Popup 是独立 HWND，不受影响。 -->
+        <Popup x:Name="SearchPopup" StaysOpen="False" AllowsTransparency="True"
+               Placement="Center" PlacementTarget="{Binding ElementName=RootGrid}"
+               PopupAnimation="Fade" Closed="OnSearchPopupClosed">
+            <Border Background="#F2181820" CornerRadius="10" Padding="24,20"
+                    Width="480" BorderBrush="#3A3A46" BorderThickness="1">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="26" ShadowDepth="6" Opacity="0.5" Color="Black" />
+                </Border.Effect>
                 <StackPanel>
-                    <TextBlock Text="搜索视频" FontSize="13" Foreground="#8C8C99" />
-                    <TextBox x:Name="SearchBox" Margin="0,10,0,0" Height="38"
+                    <TextBlock Text="搜索视频" FontSize="12" Foreground="#8C8C99" />
+                    <TextBox x:Name="SearchBox" Margin="0,10,0,0" Height="40"
                              Background="#101016" Foreground="#E8E8F0"
                              BorderBrush="#2A2A34" BorderThickness="1"
                              CaretBrush="#E8E8F0" FontSize="15" Padding="10,0"
@@ -544,7 +549,7 @@
                                Foreground="#5A5A66" Margin="0,10,0,0" />
                 </StackPanel>
             </Border>
-        </Grid>
+        </Popup>
 
     </Grid>
 </Window>

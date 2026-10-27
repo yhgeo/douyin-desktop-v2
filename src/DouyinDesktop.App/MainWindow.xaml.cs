@@ -826,6 +826,10 @@ public partial class MainWindow : Window
                     return;
                 }
 
+                // 搜索接口对频率很敏感：连着发会返回 verify_check（风控），
+                // 表现是"翻页翻不出东西"。翻第二页起先歇一下。
+                if (_searchOffset > 0) await Task.Delay(1200);
+
                 var page = await _client.SearchAsync(_searchKeyword, _searchOffset);
                 if (!page.Success)
                 {
@@ -835,6 +839,10 @@ public partial class MainWindow : Window
 
                 got = page.Items;
                 _searchOffset = page.HasMore ? page.NextOffset : -1;
+
+                // 同步给补货逻辑：它看的是 _feed.HasMore，
+                // 不同步的话"没有更多"之后还会一直去请求
+                _feed.HasMore = _searchOffset >= 0;
             }
             else if (_likesMode || _collectMode)
             {
@@ -1225,6 +1233,14 @@ public partial class MainWindow : Window
 
         _searchMode = true;
         await SwitchFeedAsync(_searchFeed, $"搜索「{keyword}」");
+
+        // 和喜欢/收藏一样，结果用封面墙展示：搜出来的一屏能一眼扫完，
+        // 比一条条划更适合"挑一个看"。
+        if (_searchFeed.Items.Count > 0)
+        {
+            ShowMineWall($"搜索：{keyword}", _searchFeed.Items);
+            SwitchTab(SideTab.Profile);
+        }
     }
 
     /// <summary>
@@ -1271,7 +1287,7 @@ public partial class MainWindow : Window
         if (_hwnd != IntPtr.Zero && _imeContext != IntPtr.Zero)
             ImmAssociateContext(_hwnd, _imeContext);
 
-        SearchLayer.Visibility = Visibility.Visible;
+        SearchPopup.IsOpen = true;
         SearchBox.Text = _searchKeyword;
         SearchBox.Focus();
         SearchBox.SelectAll();
@@ -1279,8 +1295,13 @@ public partial class MainWindow : Window
 
     private void CloseSearch()
     {
-        SearchLayer.Visibility = Visibility.Collapsed;
+        // 关 Popup 会触发 OnSearchPopupClosed，那边统一收尾
+        SearchPopup.IsOpen = false;
+    }
 
+    /// <summary>Popup 关闭（Esc / 回车 / 点外部都会走到这里）。</summary>
+    private void OnSearchPopupClosed(object? sender, EventArgs e)
+    {
         if (_hwnd != IntPtr.Zero)
             ImmAssociateContext(_hwnd, IntPtr.Zero);
 
@@ -1875,7 +1896,7 @@ public partial class MainWindow : Window
 
         // 喜欢/收藏模式下，「主页」显示的是"我的喜欢/收藏"封面墙，
         // 不能再去拉当前作者的其它作品，否则刚填好的列表立刻被覆盖。
-        if (tab == SideTab.Profile && !_likesMode && !_collectMode) _ = LoadProfileAsync();
+        if (tab == SideTab.Profile && !_likesMode && !_collectMode && !_searchMode) _ = LoadProfileAsync();
     }
 
     private async Task LoadCommentsAsync(bool reset)
@@ -2768,7 +2789,7 @@ public partial class MainWindow : Window
         if (_sideTab == SideTab.Comments) _ = LoadCommentsAsync(reset: true);
         if (_sideTab == SideTab.Profile)
         {
-            if (!_likesMode && !_collectMode) _ = LoadProfileAsync();
+            if (!_likesMode && !_collectMode && !_searchMode) _ = LoadProfileAsync();
             SyncProfileSelection();
         }
     }
@@ -2857,9 +2878,9 @@ public partial class MainWindow : Window
     {
         try
         {
-            // 搜索浮层开着时，按键全部交给输入框（回车/Esc 由 OnSearchKeyDown 处理），
+            // 搜索框开着时，按键全部交给输入框（回车/Esc 由 OnSearchKeyDown 处理），
             // 否则输入 "f" 会触发全屏、输入 "s" 会跳下一条。
-            if (SearchLayer.Visibility == Visibility.Visible) return;
+            if (SearchPopup.IsOpen) return;
             // Esc 是「退一层」，按这个顺序：
             //   全屏   -> 退全屏
             //   作者流 -> 回推荐（同时切回详情页）

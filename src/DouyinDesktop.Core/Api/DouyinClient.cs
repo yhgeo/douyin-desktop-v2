@@ -1970,6 +1970,19 @@ public sealed class DouyinClient : IDisposable
                 ? sc.GetInt32() : -1;
             if (code != 0) return SearchPage.Fail($"status_code={code}");
 
+            // 风控检测：连续请求会返回 has_more=0 + data 空，并带
+            // search_nil_info.search_nil_type="verify_check"。
+            // 不识别的话会被误判成"没有更多结果"，用户以为搜完了。
+            if (root.TryGetProperty("search_nil_info", out var nil) &&
+                nil.ValueKind == JsonValueKind.Object &&
+                nil.TryGetProperty("search_nil_type", out var nt) &&
+                nt.ValueKind == JsonValueKind.String &&
+                nt.GetString() == "verify_check")
+            {
+                Log?.Invoke("搜索触发风控（verify_check）");
+                return SearchPage.Fail("搜索太频繁，抖音要求验证。等一两分钟再试");
+            }
+
             var list = new List<Aweme>();
             if (root.TryGetProperty("data", out var arr) && arr.ValueKind == JsonValueKind.Array)
             {

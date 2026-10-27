@@ -484,11 +484,12 @@ if (args.Length > 0 && args[0] == "search2")
 {
     Console.OutputEncoding = System.Text.Encoding.UTF8;
     string kw = args.Length > 1 ? args[1] : "美女";
+    int off = args.Length > 2 && int.TryParse(args[2], out int o) ? o : 0;
 
     using var c = DouyinClient.Create();
     c.Log += m => Console.WriteLine("    " + m);
 
-    var (status, body) = await c.SearchRawAsync2(kw);
+    var (status, body) = await c.SearchRawAsync2(kw, off);
 
     Console.WriteLine($"\n=== 精确复刻 ===  HTTP {status}  {body.Length} 字节");
     Console.WriteLine("  " + body[..Math.Min(300, body.Length)].Replace("\n", " "));
@@ -498,6 +499,13 @@ if (args.Length > 0 && args[0] == "search2")
         using var doc = JsonDocument.Parse(body);
         if (doc.RootElement.TryGetProperty("status_code", out var sc))
             Console.WriteLine($"  status_code = {sc}");
+
+        Console.WriteLine("  顶层字段：" + string.Join(", ",
+            doc.RootElement.EnumerateObject().Select(p => p.Name)));
+        foreach (string k in new[] { "search_id", "cursor", "has_more", "log_pb", "extra" })
+            if (doc.RootElement.TryGetProperty(k, out var v))
+                Console.WriteLine($"    {k} = {(v.ValueKind == JsonValueKind.Object
+                    ? Short(v.ToString(), 160) : v.ToString())}");
 
         if (doc.RootElement.TryGetProperty("data", out var arr) && arr.ValueKind == JsonValueKind.Array)
         {
@@ -518,7 +526,7 @@ if (args.Length > 0 && args[0] == "search2")
     }
 
     // 走正式入口（解析成 Aweme），确认 data[].aweme_info 这条链路通
-    var parsed = await c.SearchAsync(kw);
+    var parsed = await c.SearchAsync(kw, off);
     Console.WriteLine($"\n=== SearchAsync === success={parsed.Success}  " +
                       $"{parsed.Items.Count} 条  hasMore={parsed.HasMore}  next={parsed.NextOffset}  {parsed.Message}");
     foreach (var it in parsed.Items.Take(3))
