@@ -1249,14 +1249,36 @@ public partial class MainWindow : Window
     /// U 和 Esc 共用——U 是开关，Esc 是"退一层"的直觉操作。
     /// 推荐流走缓存，不重新请求，位置还是离开时那一条。
     /// </summary>
+    /// <summary>进入作者主页之前在哪一页（Esc 要回到这里，不是一律回推荐）。</summary>
+    private FeedKind _kindBeforeProfile = FeedKind.Recommend;
+
     private async Task LeaveAuthorAsync()
     {
-        // 必须直接置枚举：只把 _authorMode / _followMode 设 false 的话，
-        // 从「喜欢」「收藏」进来时枚举还停在原处，标签和列表就对不上了。
-        _kind = FeedKind.Recommend;
-        await SwitchFeedAsync(_recommendFeed, "推荐");
+        // 回到进来的那一页：在关注页看某个作者的作品，Esc 应该回关注页。
+        // 以前一律回推荐，刷关注流时点进作者主页再退出，位置就全丢了。
+        var back = _kindBeforeProfile;
+        _kind = back;
+
+        switch (back)
+        {
+            case FeedKind.Follow:
+                await SwitchFeedAsync(_followFeed, "关注");
+                break;
+            case FeedKind.Likes:
+                await SwitchFeedAsync(_likesFeed, "喜欢");
+                break;
+            case FeedKind.Collect:
+                await SwitchFeedAsync(_collectFeed, "收藏");
+                break;
+            case FeedKind.Search:
+                await SwitchFeedAsync(_searchFeed, $"搜索「{_searchKeyword}」");
+                break;
+            default:
+                await SwitchFeedAsync(_recommendFeed, "推荐");
+                break;
+        }
+
         SwitchTab(SideTab.Detail);
-        SetStatus("已回到推荐");
     }
 
     // ================= 喜欢 / 收藏 / 关注 =================
@@ -1582,6 +1604,9 @@ public partial class MainWindow : Window
             SetStatus("加载失败：" + result.Message);
             return;
         }
+
+        // 记住"从哪一页进来的"：在关注页点作者主页，Esc 要回关注页，不是回推荐。
+        if (_kind != FeedKind.Author) _kindBeforeProfile = _kind;
 
         _authorMode = true;
         _followMode = false;
@@ -2060,6 +2085,8 @@ public partial class MainWindow : Window
         // 而且封面墙上点的本来就是当前流里的东西。
         if (idx < 0 && !_likesMode && !_collectMode)
         {
+            if (_kind != FeedKind.Author) _kindBeforeProfile = _kind;
+
             _authorMode = true;
             _followMode = false;
             _feed = _authorFeed;
@@ -2215,6 +2242,41 @@ public partial class MainWindow : Window
         {
             SetStatus("图片加载失败：" + ex.Message);
         }
+
+        // 每张显示 4 秒后自动翻下一张。放在这里而不是 EnterImageMode，
+        // 是因为手动翻页（← →）也会走这条路——手动翻完要重新计时。
+        RestartImageTimer();
+    }
+
+    // ================= 图集自动翻页 =================
+
+    private DispatcherTimer? _imageTimer;
+
+    /// <summary>图集自动翻页：一张 4 秒。最后一张停住（循环看同一组图没意义）。</summary>
+    private void RestartImageTimer()
+    {
+        _imageTimer?.Stop();
+
+        if (!_imageMode) return;
+        if (_imageItem?.Images is not { Count: > 1 } images) return;
+        if (_imageIndex >= images.Count - 1) return;      // 已经是最后一张
+
+        _imageTimer ??= new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+        _imageTimer.Tick -= OnImageAutoTick;              // 防止重复订阅
+        _imageTimer.Tick += OnImageAutoTick;
+        _imageTimer.Start();
+    }
+
+    private async void OnImageAutoTick(object? sender, EventArgs e)
+    {
+        _imageTimer?.Stop();
+
+        if (!_imageMode) return;
+        if (_imageItem?.Images is not { Count: > 0 } images) return;
+        if (_imageIndex >= images.Count - 1) return;
+
+        // StepImageAsync 内部会 LoadImageAsync，那边再重启计时
+        await StepImageAsync(1);
     }
 
     private async Task<byte[]> GetImageBytesAsync(ImageInfo info)
@@ -2281,6 +2343,7 @@ public partial class MainWindow : Window
         if (!_imageMode) return;
         _imageMode = false;
         _imageItem = null;
+        _imageTimer?.Stop();
         ImageView.Source = null;
         ImageLayer.Visibility = Visibility.Collapsed;
         Surface.Visibility = Visibility.Visible;
@@ -2305,9 +2368,12 @@ public partial class MainWindow : Window
 
         _ = Task.Run(async () =>
         {
-            // 顺序即优先级：用户主要往下刷，所以 +1 > +2 > -1。
+            // 顺序即优先级：用户主要往下刷，所以 +1 > +2 > +3 > -1。
             // 带宽不够时，先保证马上要切的那条完整，回退那条放到最后。
-            foreach (int offset in new[] { 1, 2, -1 })
+            //
+            // 预取三条往下：只预取两条时，连续快速滑动很容易"每次都刚好错过"——
+            // 上一轮还没下完就被 Cancel，结果一条都没预取成，表现就是一直缓冲。
+            foreach (int offset in new[] { 1, 2, 3, -1 })
             {
                 if (cts.IsCancellationRequested) return;
 
