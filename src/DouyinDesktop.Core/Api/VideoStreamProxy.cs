@@ -22,11 +22,27 @@ namespace DouyinDesktop.Core.Api;
 /// </summary>
 public sealed class VideoStreamProxy : IAsyncDisposable
 {
-    /// <summary>预取多少字节。1MB ≈ 1080p 的 2–4 秒，够 mpv 出首帧并建立缓冲；
-    /// 再多没意义——CDN 慢的时候 2MB 要下十秒，反而挤占当前视频的带宽。</summary>
+    /// <summary>播放时"边转发边攒头"的上限。1MB 够 mpv 出首帧并建立缓冲。</summary>
     public const int DefaultPrefetchBytes = 1024 * 1024;
 
-    private const int MaxEntries = 40;
+    /// <summary>
+    /// 预取目标时长（秒）。按每条视频的实际码率折算字节数：
+    /// 2Mbps 的 5 秒 ≈ 1.25MB，8Mbps 的 5 秒 ≈ 5MB。
+    ///
+    /// 为什么按时长而不是固定字节：1MB 对低码率是 5 秒，对高码率只有 1 秒多，
+    /// 后者预取了等于没预取。
+    /// </summary>
+    public const int DefaultPrefetchSeconds = 5;
+
+    /// <summary>
+    /// 预取限速。**这是保证当前视频流畅的关键**：
+    /// 不限速的话，切视频瞬间预取会和首包抢同一条连接，
+    /// 表现就是"当前这条反而要缓冲"。
+    /// </summary>
+    private const int PrefetchRateBytesPerSec = 2 * 1024 * 1024;
+
+    /// <summary>内存里最多留多少条（每条 1–5MB，20 条约 60MB 封顶）。</summary>
+    private const int MaxEntries = 20;
 
     private readonly TcpListener _listener;
     private readonly HttpClient _http;
@@ -34,15 +50,17 @@ public sealed class VideoStreamProxy : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _acceptLoop;
     private readonly int _prefetchBytes;
+    private readonly int _prefetchSeconds;
     private readonly string _userAgent;
     private readonly PrefetchCache? _cache;
     private bool _disposed;
 
     public int Port { get; }
 
-    private VideoStreamProxy(int prefetchBytes, string userAgent, PrefetchCache? cache)
+    private VideoStreamProxy(int prefetchBytes, int prefetchSeconds, string userAgent, PrefetchCache? cache)
     {
         _prefetchBytes = prefetchBytes;
+        _prefetchSeconds = prefetchSeconds;
         _userAgent = userAgent;
         _cache = cache;
 
@@ -64,8 +82,24 @@ public sealed class VideoStreamProxy : IAsyncDisposable
     }
 
     public static VideoStreamProxy Start(
-        int prefetchBytes = DefaultPrefetchBytes, string? userAgent = null, PrefetchCache? cache = null)
-        => new(prefetchBytes, userAgent ?? DeviceProfile.DefaultUserAgent, cache);
+        int prefetchBytes = DefaultPrefetchBytes,
+        int prefetchSeconds = DefaultPrefetchSeconds,
+        string? userAgent = null,
+        PrefetchCache? cache = null)
+        => new(prefetchBytes, prefetchSeconds, userAgent ?? DeviceProfile.DefaultUserAgent, cache);
+
+    /// <summary>这条视频预取多少字节：按码率折算 N 秒，拿不到码率就按 2Mbps 估。</summary>
+    private int TargetBytesFor(Aweme item)
+    {
+        long bps = item.Video?.MaxBitRate ?? 0;
+        if (bps <= 0) bps = 2_000_000;          // 接口没给码率时的保守估计
+
+        long bytes = bps / 8 * _prefetchSeconds;
+
+        // 512KB 是下限（低码率视频也要够出首帧），8MB 是上限
+        // （再高说明码率离谱，预取它只会拖垮带宽）
+        return (int)Math.Clamp(bytes, 512 * 1024, 8 * 1024 * 1024);
+    }
 
     /// <summary>给 mpv 播的本地地址。uri 必须一起带上——代理第一次见到它时才知道去哪拉。</summary>
     public string UrlFor(Aweme item)
@@ -83,20 +117,22 @@ public sealed class VideoStreamProxy : IAsyncDisposable
 
     // ================= 预取 =================
 
-    /// <summary>预取开头一段。已经够了就直接返回，不重复下载。</summary>
+    /// <summary>预取开头一段（按码率折算的 N 秒）。已经够了就直接返回，不重复下载。</summary>
     public async Task PrefetchAsync(Aweme item, CancellationToken ct = default)
     {
         string uri = item.Video?.PlayAddr?.Uri ?? "";
         if (string.IsNullOrEmpty(uri) || string.IsNullOrEmpty(item.Id)) return;
 
+        int target = TargetBytesFor(item);
+
         var entry = GetOrCreate(item.Id, DouyinClient.BuildPlayUrl(uri));
-        if (entry.HeadLength >= _prefetchBytes) return;
+        if (entry.HeadLength >= target) return;
 
         await entry.Gate.WaitAsync(ct);
         try
         {
-            if (entry.HeadLength >= _prefetchBytes) return;
-            await FetchHeadAsync(entry, ct);
+            if (entry.HeadLength >= target) return;
+            await FetchHeadAsync(entry, target, ct);
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
         {
@@ -108,9 +144,9 @@ public sealed class VideoStreamProxy : IAsyncDisposable
         }
     }
 
-    private async Task FetchHeadAsync(StreamEntry entry, CancellationToken ct)
+    private async Task FetchHeadAsync(StreamEntry entry, int targetBytes, CancellationToken ct)
     {
-        using var req = BuildCdnRequest(entry.SourceUrl, 0, _prefetchBytes - 1);
+        using var req = BuildCdnRequest(entry.SourceUrl, 0, targetBytes - 1);
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
         if (!resp.IsSuccessStatusCode) return;
 
@@ -118,13 +154,22 @@ public sealed class VideoStreamProxy : IAsyncDisposable
         entry.ContentType = resp.Content.Headers.ContentType?.MediaType ?? "video/mp4";
 
         await using var src = await resp.Content.ReadAsStreamAsync(ct);
-        var ms = new MemoryStream(_prefetchBytes);
+        var ms = new MemoryStream(targetBytes);
         byte[] buf = new byte[64 * 1024];
-        while (ms.Length < _prefetchBytes)
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        while (ms.Length < targetBytes)
         {
             int n = await src.ReadAsync(buf, ct);
             if (n <= 0) break;
             ms.Write(buf, 0, n);
+
+            // 限速：按"已下字节 ÷ 目标速率"算出本该花的时间，快了就等一下。
+            // CDN 本身比 2MB/s 慢时 delay 为 0，不会额外拖慢。
+            double shouldTakeMs = ms.Length * 1000.0 / PrefetchRateBytesPerSec;
+            double elapsedMs = clock.Elapsed.TotalMilliseconds;
+            if (shouldTakeMs > elapsedMs + 8)
+                await Task.Delay((int)(shouldTakeMs - elapsedMs), ct);
         }
 
         entry.Head = ms.ToArray();

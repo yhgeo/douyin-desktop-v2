@@ -2368,6 +2368,12 @@ public partial class MainWindow : Window
 
         _ = Task.Run(async () =>
         {
+            // 先让当前这条把首包和缓冲建立起来，再开始预取。
+            // 不延迟的话，切视频瞬间预取会和首包抢同一条连接，
+            // 表现就是"当前这条反而要缓冲"——本末倒置。
+            try { await Task.Delay(800, cts.Token); }
+            catch (OperationCanceledException) { return; }
+
             // 顺序即优先级：用户主要往下刷，所以 +1 > +2 > +3 > -1。
             // 带宽不够时，先保证马上要切的那条完整，回退那条放到最后。
             //
