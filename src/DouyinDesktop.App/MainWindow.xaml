@@ -304,6 +304,7 @@
                     <Grid x:Name="CommentsPane" Grid.Row="1" Visibility="Collapsed">
                         <ScrollViewer x:Name="CommentScroll" VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled"
+                                      Style="{StaticResource SlimScrollViewer}"
                                       ScrollChanged="OnCommentScroll">
                             <ItemsControl x:Name="CommentList">
                                 <ItemsControl.ItemTemplate>

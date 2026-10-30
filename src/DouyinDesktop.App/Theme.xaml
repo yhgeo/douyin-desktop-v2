@@ -276,8 +276,49 @@
     </Style>
 
     <!--
+        精简版 ScrollViewer：**专门用来让上面的细滚动条真正生效**。
+
+        为什么需要它：WPF 默认的 ScrollViewer 模板在内部给 ScrollBar 写了
+        显式 Style/Width，**局部值优先级高于隐式样式**，所以上面那条
+        `<Style TargetType="ScrollBar">` 对 ScrollViewer 里的滚动条根本不起作用
+        （表现就是"改了 Width 没反应"，滑块还是系统那种浅灰粗条）。
+
+        自己给一套最小模板、不给 ScrollBar 设 Style，它就会退回到隐式样式。
+        只做垂直滚动——用它的地方都是 HorizontalScrollBarVisibility="Disabled"。
+    -->
+    <Style x:Key="SlimScrollViewer" TargetType="ScrollViewer">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollViewer">
+                    <Grid Background="{TemplateBinding Background}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <ScrollContentPresenter Grid.Column="0"
+                                                CanContentScroll="{TemplateBinding CanContentScroll}"
+                                                Content="{TemplateBinding Content}"
+                                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                Margin="{TemplateBinding Padding}" />
+
+                        <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1"
+                                   Orientation="Vertical"
+                                   Value="{TemplateBinding VerticalOffset}"
+                                   Maximum="{TemplateBinding ScrollableHeight}"
+                                   ViewportSize="{TemplateBinding ViewportHeight}"
+                                   Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
         细滚动条。系统默认的滚动条带上下箭头按钮、宽 17px，在深色界面里
-        像贴了一条铁皮。这里去掉箭头、收窄到 6px、滑块用圆角，hover 才变亮。
+        像贴了一条铁皮。这里去掉箭头、收窄到 3px、滑块用圆角，hover 才变亮。
+        ⚠️ 只对"没有自定义模板的 ScrollViewer"生效，默认模板会覆盖它——
+        要用细滚动条的地方请套 SlimScrollViewer。
     -->
     <Style TargetType="ScrollBar">
         <Setter Property="Width" Value="3" />
