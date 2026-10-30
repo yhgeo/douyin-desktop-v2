@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Windows.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -196,6 +197,14 @@ public partial class MainWindow : Window
         InitializeComponent();
         _feed = _recommendFeed;
         CommentList.ItemsSource = _commentVms;
+
+        // 评论区的滚动条会被 ScrollViewer 的布局反复重置成系统宽度（实测 16.8px），
+        // 设一次不够——2.5 秒后又被改回去。这里每次布局后纠正一遍。
+        // 只在评论页生效，其他页面不碰。
+        CommentScroll.LayoutUpdated += (_, _) =>
+        {
+            if (_sideTab == SideTab.Comments) SlimScrollBars(CommentScroll);
+        };
         _client.Log += msg => Dispatcher.BeginInvoke(() => PushStatus(msg));
         // 强校验接口走「浏览器模板」：平时不碰浏览器，模板缺失/失效才抓一次
         _client.GetTemplate = ApiTemplate.Get;
@@ -507,6 +516,56 @@ public partial class MainWindow : Window
 
     private IntPtr _hwnd;
     private IntPtr _imeContext;
+
+    private static void CollectVisual<T>(DependencyObject root, List<T> list) where T : DependencyObject
+    {
+        int n = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < n; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T t) list.Add(t);
+            CollectVisual(child, list);
+        }
+    }
+
+    /// <summary>
+    /// 把某个滚动区域里的滚动条换成细样式。
+    ///
+    /// **为什么必须在代码里做**：ScrollViewer 会给内部的 ScrollBar 设**局部** Width
+    /// （实测 16.8px）。WPF 的优先级是「局部值 > 样式 Setter > 主题默认」，
+    /// 所以 XAML 里改 Style、甚至换掉 ScrollViewer 的 ControlTemplate 都压不过它。
+    /// 只能直接给 ScrollBar 赋 Style/Width——那才是局部值。
+    /// </summary>
+    private void SlimScrollBars(DependencyObject root)
+    {
+        var slim = TryFindResource(typeof(ScrollBar)) as Style;
+
+        var bars = new List<ScrollBar>();
+        CollectVisual(root, bars);
+
+        foreach (var b in bars)
+        {
+            if (b.Style != slim) b.Style = slim;
+
+            // ⚠️ 必须用 != 而不是 Math.Abs(...) > 0.1：
+            // Width 默认是 NaN（Auto），NaN 参与的任何比较都是 false，
+            // 用 Math.Abs 判断会导致"永远不设"——这里踩过一次。
+            //
+            // ⚠️ 还必须一起设 MinWidth/MinHeight：ActualWidth = max(MinWidth, Width)，
+            // 只设 Width=3 而 MinWidth 还是系统给的 16.8 时，
+            // 属性看着是 3、实际渲染还是 16.8（这个坑卡了很久）。
+            if (b.Orientation == Orientation.Vertical)
+            {
+                if (b.Width != 3) b.Width = 3;
+                if (b.MinWidth != 3) b.MinWidth = 3;
+            }
+            else
+            {
+                if (b.Height != 3) b.Height = 3;
+                if (b.MinHeight != 3) b.MinHeight = 3;
+            }
+        }
+    }
 
     /// <summary>
     /// 点画面暂停 / 继续。
@@ -1925,6 +1984,14 @@ public partial class MainWindow : Window
             // 就停在中间，看起来像"打开时位置随机"。
             CommentScroll.ScrollToTop();
             _ = LoadCommentsAsync(reset: _commentAwemeId != CurrentId);
+
+            // 滚动条样式：XAML 里的 Style/模板都压不过 ScrollViewer 内部给 ScrollBar
+            // 设的局部 Width（实测 16.8px，改 Style 和 ControlTemplate 都没用），
+            // 只能在代码里直接赋——局部赋值的优先级高于一切。
+            SlimScrollBars(CommentScroll);
+            // 模板可能还没应用（ScrollBar 尚未创建），布局完再补一次（幂等）
+            Dispatcher.BeginInvoke(new Action(() => SlimScrollBars(CommentScroll)),
+                                   DispatcherPriority.Loaded);
         }
 
         // 喜欢/收藏模式下，「主页」显示的是"我的喜欢/收藏"封面墙，

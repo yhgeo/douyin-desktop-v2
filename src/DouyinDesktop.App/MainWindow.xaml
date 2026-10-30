@@ -304,8 +304,36 @@
                     <Grid x:Name="CommentsPane" Grid.Row="1" Visibility="Collapsed">
                         <ScrollViewer x:Name="CommentScroll" VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled"
-                                      Style="{StaticResource SlimScrollViewer}"
                                       ScrollChanged="OnCommentScroll">
+                            <!-- 模板必须内联。
+                                 走 Style 的时候实测没生效（诊断到的滚动条还是系统默认 16.8px），
+                                 而默认 ScrollViewer 模板会给内部 ScrollBar 设局部 Width，
+                                 局部值优先级最高，代码里设完也会被布局覆盖回去。
+                                 内联模板里直接给 ScrollBar 写 Width="3"，才是最终生效的那一层。 -->
+                            <ScrollViewer.Template>
+                                <ControlTemplate TargetType="ScrollViewer">
+                                    <Grid Background="{TemplateBinding Background}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <ScrollContentPresenter Grid.Column="0"
+                                                                CanContentScroll="{TemplateBinding CanContentScroll}"
+                                                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                                Margin="{TemplateBinding Padding}" />
+
+                                        <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1"
+                                                   Orientation="Vertical"
+                                                   Width="3"
+                                                   Style="{DynamicResource {x:Type ScrollBar}}"
+                                                   Value="{TemplateBinding VerticalOffset}"
+                                                   Maximum="{TemplateBinding ScrollableHeight}"
+                                                   ViewportSize="{TemplateBinding ViewportHeight}"
+                                                   Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" />
+                                    </Grid>
+                                </ControlTemplate>
+                            </ScrollViewer.Template>
                             <ItemsControl x:Name="CommentList">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
