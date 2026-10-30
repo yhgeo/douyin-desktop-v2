@@ -286,7 +286,11 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ScrollBar">
                     <Grid Background="Transparent">
-                        <Track x:Name="PART_Track" IsDirectionReversed="True">
+                        <!-- Orientation 必须绑上：Track 的默认值是 Horizontal，
+                             不绑的话垂直滚动条会按横向布局排，滑块被拉成整条宽，
+                             看起来就是"滚动条很粗"，改 Width 也没用。 -->
+                        <Track x:Name="PART_Track" IsDirectionReversed="True"
+                               Orientation="{TemplateBinding Orientation}">
                             <Track.DecreaseRepeatButton>
                                 <RepeatButton Command="ScrollBar.PageUpCommand"
                                               Style="{x:Null}" Opacity="0" Focusable="False" />
