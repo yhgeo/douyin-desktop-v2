@@ -1918,7 +1918,14 @@ public partial class MainWindow : Window
         CommentsPane.Visibility = tab == SideTab.Comments ? Visibility.Visible : Visibility.Collapsed;
         ProfilePane.Visibility = tab == SideTab.Profile ? Visibility.Visible : Visibility.Collapsed;
 
-        if (tab == SideTab.Comments) _ = LoadCommentsAsync(reset: _commentAwemeId != CurrentId);
+        if (tab == SideTab.Comments)
+        {
+            // 每次打开评论区都从顶部开始。
+            // 不清的话会保留上次滚到的位置——在评论里翻到中间、切去详情再切回来，
+            // 就停在中间，看起来像"打开时位置随机"。
+            CommentScroll.ScrollToTop();
+            _ = LoadCommentsAsync(reset: _commentAwemeId != CurrentId);
+        }
 
         // 喜欢/收藏模式下，「主页」显示的是"我的喜欢/收藏"封面墙，
         // 不能再去拉当前作者的其它作品，否则刚填好的列表立刻被覆盖。
@@ -1945,6 +1952,11 @@ public partial class MainWindow : Window
             _commentsHasMore = true;
             _commentVms.Clear();
             CommentEmpty.Visibility = Visibility.Collapsed;
+
+            // 换了一条视频：列表清空后把滚动条也归零。
+            // 内容变空时 WPF 一般会自动 clamp 到 0，但等新评论填进来时
+            // 偏移量有时会被恢复成旧值，所以显式复位一次。
+            CommentScroll.ScrollToTop();
         }
         if (!_commentsHasMore) return;
 
