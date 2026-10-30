@@ -280,7 +280,7 @@
         像贴了一条铁皮。这里去掉箭头、收窄到 6px、滑块用圆角，hover 才变亮。
     -->
     <Style TargetType="ScrollBar">
-        <Setter Property="Width" Value="4" />
+        <Setter Property="Width" Value="3" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Template">
             <Setter.Value>
@@ -323,7 +323,7 @@
         <Style.Triggers>
             <Trigger Property="Orientation" Value="Horizontal">
                 <Setter Property="Width" Value="Auto" />
-                <Setter Property="Height" Value="6" />
+                <Setter Property="Height" Value="3" />
             </Trigger>
         </Style.Triggers>
     </Style>
